@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, FileUp, X } from "lucide-react";
 import { showError } from "@/utils/toast";
 
 const mockResults = {
@@ -48,33 +48,63 @@ const Index = () => {
   const [tone, setTone] = useState("academic");
   const [results, setResults] = useState<typeof mockResults | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.type === "application/pdf") {
+        setSelectedFile(file);
+        setContent(""); // Clear textarea when a file is selected
+      } else {
+        showError("Please select a PDF file.");
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    }
+  };
+
+  const clearFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const handleGenerate = async () => {
     setIsLoading(true);
-    setResults(null); // Clear previous results
+    setResults(null);
 
     try {
-      // This is where you would make the actual API call.
-      // We are using a placeholder to demonstrate the structure.
-      // You can replace this with a `fetch` call to your AI service.
-      /*
-      const response = await fetch("/api/summarize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic, dateRange, content, tone }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to get a response from the AI.");
+      if (selectedFile) {
+        console.log("Processing file:", selectedFile.name);
+        // In a real application, you would use FormData to upload the file
+        // to your backend for processing.
+        // const formData = new FormData();
+        // formData.append("file", selectedFile);
+        // const response = await fetch("/api/summarize-pdf", {
+        //   method: "POST",
+        //   body: formData,
+        // });
+      } else if (content) {
+        console.log("Processing text content.");
+        // This is where you would make the actual API call for text.
+        /*
+        const response = await fetch("/api/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic, dateRange, content, tone }),
+        });
+        if (!response.ok) throw new Error("Failed to get a response from the AI.");
+        const data = await response.json();
+        */
       }
-      
-      const data = await response.json();
-      */
 
-      // We'll simulate the network delay and then use mock data.
       await new Promise(resolve => setTimeout(resolve, 1500));
-      const data = mockResults; // In a real scenario, this would be `await response.json()`
-
+      const data = mockResults;
       setResults(data);
 
     } catch (error) {
@@ -112,14 +142,39 @@ const Index = () => {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="abstracts">Paste links or abstracts</Label>
+            <Label htmlFor="abstracts">Paste links/abstracts or upload a PDF</Label>
             <Textarea
               id="abstracts"
               placeholder="Paste the content you want to summarize here..."
               className="min-h-[200px] rounded-md"
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => {
+                setContent(e.target.value);
+                if (selectedFile) clearFile();
+              }}
+              disabled={!!selectedFile}
             />
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="application/pdf"
+              className="hidden"
+            />
+            <div className="flex items-center justify-between pt-2">
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                    <FileUp className="mr-2 h-4 w-4" />
+                    Attach PDF
+                </Button>
+                {selectedFile && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span className="truncate max-w-xs">{selectedFile.name}</span>
+                        <Button variant="ghost" size="icon" onClick={clearFile}>
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </div>
+                )}
+            </div>
           </div>
 
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -140,7 +195,7 @@ const Index = () => {
                 </div>
               </RadioGroup>
             </div>
-            <Button onClick={handleGenerate} disabled={isLoading || !content} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
+            <Button onClick={handleGenerate} disabled={isLoading || (!content && !selectedFile)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
               {isLoading ? "Generating..." : "Generate Summary"}
             </Button>
           </div>
