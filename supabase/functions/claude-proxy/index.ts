@@ -1,27 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { Buffer } from "https://deno.land/std@0.190.0/io/buffer.ts";
-import * as pdfjs from 'https://esm.sh/pdfjs-dist@4.4.168';
-
-// Set the worker source for pdf.js
-pdfjs.GlobalWorkerOptions.workerSrc = `https://esm.sh/pdfjs-dist@4.4.168/build/pdf.worker.mjs`;
+import { decode } from "https://deno.land/std@0.190.0/encoding/base64.ts";
+import pdf from 'https://esm.sh/pdf-parse@1.1.1/lib/pdf-parse.js';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Helper function to extract text from a PDF buffer
-async function getPdfText(data: Uint8Array) {
-    const pdf = await pdfjs.getDocument(data).promise;
-    let text = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map(item => ('str' in item ? item.str : ''));
-        text += strings.join(' ') + '\n';
-    }
-    return text;
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -39,8 +23,9 @@ serve(async (req) => {
 
     // If a PDF file is uploaded, decode it and extract the text
     if (fileData) {
-      const buffer = Buffer.from(fileData, 'base64');
-      researchText = await getPdfText(buffer.bytes());
+      const pdfBytes = decode(fileData);
+      const data = await pdf(pdfBytes);
+      researchText = data.text;
     }
 
     if (!researchText) {
