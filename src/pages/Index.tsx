@@ -11,6 +11,60 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ExternalLink, FileUp, X } from "lucide-react";
 import { showError } from "@/utils/toast";
 
+const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper.
+
+Your task is to extract and organize all essential scientific information from the paper, **without missing any key details**, especially from the methods and results.
+
+Follow this format strictly:
+
+---
+
+**Title:**  
+[Extracted]
+
+**Authors:**  
+[Extracted if available]
+
+**Journal/DOI:**  
+[Extracted if available]
+
+---
+
+### 1. Research Question  
+- What problem is being investigated?
+
+### 2. Background  
+- Prior context, motivation, previous gaps
+
+### 3. Methodology  
+Include:
+- Study type (e.g., RCT, observational, simulation)
+- Sample size and characteristics
+- Data collection tools, procedures
+- Controls, variables, models
+
+### 4. Key Findings  
+- All experimental results
+- Quantitative outcomes, effect sizes, statistical metrics (e.g. p-values)
+- Any differences across groups or conditions
+
+### 5. Conclusions  
+- What the authors claim based on their results
+
+### 6. Limitations  
+- Any constraints or cautions mentioned
+
+### 7. Future Directions  
+- Any proposed next steps or open questions
+
+---
+
+**Instructions:**
+- Be exhaustive and precise
+- Do NOT skip anything, especially in methods or findings
+- If a section is not present, write “Not stated”
+- Use bullet points when listing multiple items`;
+
 const mockResults = {
   summary: "Recent research on stem cell-derived islets has shown significant promise in treating type 1 diabetes. Studies focus on improving the functionality and survival of transplanted islets, with new protocols enhancing glucose-responsive insulin secretion. Key challenges remain in scalability and preventing immune rejection.",
   papers: [
@@ -81,10 +135,12 @@ const Index = () => {
     try {
       if (selectedFile) {
         console.log("Processing file:", selectedFile.name);
+        console.log("Using PDF Analysis Prompt:", PDF_ANALYSIS_PROMPT);
         // In a real application, you would use FormData to upload the file
-        // to your backend for processing.
+        // and send the prompt to your backend for processing.
         // const formData = new FormData();
         // formData.append("file", selectedFile);
+        // formData.append("prompt", PDF_ANALYSIS_PROMPT);
         // const response = await fetch("/api/summarize-pdf", {
         //   method: "POST",
         //   body: formData,
