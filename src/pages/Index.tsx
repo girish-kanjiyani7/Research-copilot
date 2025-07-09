@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ExternalLink } from "lucide-react";
+import { showError } from "@/utils/toast";
 
 const mockResults = {
   summary: "Recent research on stem cell-derived islets has shown significant promise in treating type 1 diabetes. Studies focus on improving the functionality and survival of transplanted islets, with new protocols enhancing glucose-responsive insulin secretion. Key challenges remain in scalability and preventing immune rejection.",
@@ -48,13 +49,40 @@ const Index = () => {
   const [results, setResults] = useState<typeof mockResults | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setResults(mockResults);
+    setResults(null); // Clear previous results
+
+    try {
+      // This is where you would make the actual API call.
+      // We are using a placeholder to demonstrate the structure.
+      // You can replace this with a `fetch` call to your AI service.
+      /*
+      const response = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, dateRange, content, tone }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to get a response from the AI.");
+      }
+      
+      const data = await response.json();
+      */
+
+      // We'll simulate the network delay and then use mock data.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const data = mockResults; // In a real scenario, this would be `await response.json()`
+
+      setResults(data);
+
+    } catch (error) {
+      console.error("API call failed:", error);
+      showError("There was an error generating the summary. Please try again.");
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (
