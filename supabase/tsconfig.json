@@ -1,11 +1,16 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "module": "es2022",
-    "lib": ["deno.ns", "dom"],
+    "target": "esnext",
+    "module": "esnext",
+    "lib": ["esnext", "deno.ns", "dom"],
+    "moduleResolution": "bundler",
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
     "jsx": "react-jsx",
     "jsxImportSource": "https://esm.sh/react@18.2.0"
   },
-  "include": ["./functions/**/*"]
+  "include": ["./functions/**/*.ts"]
 }
