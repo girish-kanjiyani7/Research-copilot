@@ -1,10 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { decode } from "https://deno.land/std@0.190.0/encoding/base64.ts";
-// Use the more robust pdf.js library for parsing
-import * as pdfjs from "https://esm.sh/pdfjs-dist@4.4.168";
-
-// The worker is needed for the library to run in this environment
-pdfjs.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.4.168/build/pdf.worker.mjs";
+import pdf from 'https://esm.sh/pdf-parse@1.1.1';
+import { Buffer } from "https://deno.land/std@0.177.0/node/buffer.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,29 +16,25 @@ serve(async (req) => {
   try {
     const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
     if (!claudeApiKey) {
-      throw new Error("CLAUDE_API_KEY is not set in your project's secrets.");
+      console.error("CRITICAL: CLAUDE_API_KEY secret is not set.");
+      throw new Error("CLAUDE_API_KEY is not set in project's secrets.");
     }
 
     const { fileData, prompt, content, tone } = await req.json();
     let researchText = content;
 
-    // If a PDF file is uploaded, decode it and extract the text using pdf.js
     if (fileData) {
+      console.log("Received PDF data. Starting parsing with pdf-parse...");
       const pdfBytes = decode(fileData);
-      const doc = await pdfjs.getDocument({ data: pdfBytes }).promise;
-      const numPages = doc.numPages;
-      let fullText = '';
-      for (let i = 1; i <= numPages; i++) {
-        const page = await doc.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => (item as any).str).join(' ');
-        fullText += pageText + '\n';
-      }
-      researchText = fullText;
+      // The 'pdf-parse' library expects a Node.js Buffer, so we create one.
+      const pdfBuffer = Buffer.from(pdfBytes);
+      const data = await pdf(pdfBuffer);
+      researchText = data.text;
+      console.log(`Successfully parsed PDF. Extracted text length: ${researchText.length}`);
     }
 
     if (!researchText) {
-      return new Response(JSON.stringify({ error: 'No content provided.' }), {
+      return new Response(JSON.stringify({ error: 'No content provided to analyze.' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -52,6 +45,7 @@ serve(async (req) => {
       finalPrompt = `You are a research assistant. Summarize the following text in a ${tone} tone.`;
     }
 
+    console.log("Sending request to Claude API...");
     const claudeApiUrl = "https://api.anthropic.com/v1/messages";
     const apiResponse = await fetch(claudeApiUrl, {
       method: 'POST',
@@ -75,13 +69,14 @@ serve(async (req) => {
 
     const claudeData = await apiResponse.json();
     const summary = claudeData.content[0].text;
+    console.log("Successfully received summary from Claude API.");
 
     return new Response(JSON.stringify({ summary }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (error) {
-    console.error("Edge function error:", error);
+    console.error("Edge function execution error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
