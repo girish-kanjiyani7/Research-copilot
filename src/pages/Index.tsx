@@ -7,9 +7,9 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ExternalLink, FileUp, X } from "lucide-react";
 import { showError } from "@/utils/toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper.
 
@@ -65,42 +65,12 @@ Include:
 - If a section is not present, write “Not stated”
 - Use bullet points when listing multiple items`;
 
-const mockResults = {
-  summary: "Recent research on stem cell-derived islets has shown significant promise in treating type 1 diabetes. Studies focus on improving the functionality and survival of transplanted islets, with new protocols enhancing glucose-responsive insulin secretion. Key challenges remain in scalability and preventing immune rejection.",
-  papers: [
-    {
-      id: "paper1",
-      title: "Generation of functional human pancreatic β cells in vitro",
-      authors: "Pagliuca, F.W., Millman, J.R., et al.",
-      year: "2014",
-      doi: "10.1016/j.cell.2014.09.040",
-      findings: [
-        "Developed a scalable protocol to differentiate human pluripotent stem cells (hPSCs) into functional pancreatic β cells.",
-        "These stem-cell-derived β cells (SC-β cells) secrete insulin in response to glucose and can reverse diabetes in mice.",
-        "The protocol mimics normal pancreatic development, providing a potential cell-replacement therapy for type 1 diabetes."
-      ]
-    },
-    {
-      id: "paper2",
-      title: "Stem-cell-derived β-cells in a macroencapsulation device protect mice from diabetes",
-      authors: "Vegas, A.J., O'Doherty, E., et al.",
-      year: "2016",
-      doi: "10.1038/nmed.3640",
-      findings: [
-        "Engineered an alginate derivative (TMTD-alginate) for macroencapsulation that reduces foreign body response.",
-        "Encapsulated human SC-β cells successfully controlled glucose levels in immunocompetent diabetic mice for up to 6 months.",
-        "This approach combines advanced cell therapy with a biocompatible device to avoid immune rejection."
-      ]
-    }
-  ]
-};
-
 const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
   const [content, setContent] = useState("");
   const [tone, setTone] = useState("academic");
-  const [results, setResults] = useState<typeof mockResults | null>(null);
+  const [results, setResults] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -128,44 +98,54 @@ const Index = () => {
     }
   };
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   const handleGenerate = async () => {
     setIsLoading(true);
     setResults(null);
 
     try {
+      let bodyPayload = {};
+
       if (selectedFile) {
-        console.log("Processing file:", selectedFile.name);
-        console.log("Using PDF Analysis Prompt:", PDF_ANALYSIS_PROMPT);
-        // In a real application, you would use FormData to upload the file
-        // and send the prompt to your backend for processing.
-        // const formData = new FormData();
-        // formData.append("file", selectedFile);
-        // formData.append("prompt", PDF_ANALYSIS_PROMPT);
-        // const response = await fetch("/api/summarize-pdf", {
-        //   method: "POST",
-        //   body: formData,
-        // });
+        const fileData = await fileToBase64(selectedFile);
+        bodyPayload = {
+          fileData,
+          prompt: PDF_ANALYSIS_PROMPT,
+        };
       } else if (content) {
-        console.log("Processing text content.");
-        // This is where you would make the actual API call for text.
-        /*
-        const response = await fetch("/api/summarize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic, dateRange, content, tone }),
-        });
-        if (!response.ok) throw new Error("Failed to get a response from the AI.");
-        const data = await response.json();
-        */
+        bodyPayload = {
+          content,
+          tone,
+        };
+      } else {
+        showError("Please provide content or a file.");
+        setIsLoading(false);
+        return;
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const data = mockResults;
-      setResults(data);
+      const { data, error } = await supabase.functions.invoke('claude-proxy', {
+        body: bodyPayload,
+      });
 
-    } catch (error) {
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      setResults(data.summary);
+
+    } catch (error: any) {
       console.error("API call failed:", error);
-      showError("There was an error generating the summary. Please try again.");
+      showError(error.message || "There was an error generating the summary.");
     } finally {
       setIsLoading(false);
     }
@@ -261,40 +241,12 @@ const Index = () => {
           <div className="space-y-8 pt-8 border-t max-w-4xl mx-auto">
             <Card>
               <CardHeader>
-                <CardTitle className="text-2xl font-bold">Summary</CardTitle>
+                <CardTitle className="text-2xl font-bold">Analysis Results</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground">{results.summary}</p>
+                <p className="text-muted-foreground whitespace-pre-wrap">{results}</p>
               </CardContent>
             </Card>
-
-            <div className="space-y-4">
-                <h2 className="text-2xl font-bold">Referenced Papers</h2>
-                <Accordion type="single" collapsible className="w-full">
-                  {results.papers.map((paper) => (
-                    <AccordionItem value={paper.id} key={paper.id}>
-                      <AccordionTrigger>
-                        <div className="flex justify-between items-center w-full pr-4">
-                            <span className="font-bold text-left flex-1">{paper.title}</span>
-                            <span className="text-muted-foreground text-sm whitespace-nowrap pl-4">{paper.authors}, {paper.year}</span>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="space-y-4 p-2">
-                            <a href={`https://doi.org/${paper.doi}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-blue-500 hover:underline">
-                                View on DOI <ExternalLink className="h-4 w-4" />
-                            </a>
-                            <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-                                {paper.findings.map((finding, index) => (
-                                    <li key={index}>{finding}</li>
-                                ))}
-                            </ul>
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-            </div>
           </div>
         )}
       </main>
