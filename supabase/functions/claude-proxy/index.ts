@@ -1,6 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { decode } from "https://deno.land/std@0.190.0/encoding/base64.ts";
-import pdf from 'https://esm.sh/pdf-parse@1.1.1/lib/pdf-parse.js';
+// Use the more robust pdf.js library for parsing
+import * as pdfjs from "https://esm.sh/pdfjs-dist@4.4.168";
+
+// The worker is needed for the library to run in this environment
+pdfjs.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.4.168/build/pdf.worker.mjs";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,11 +25,19 @@ serve(async (req) => {
     const { fileData, prompt, content, tone } = await req.json();
     let researchText = content;
 
-    // If a PDF file is uploaded, decode it and extract the text
+    // If a PDF file is uploaded, decode it and extract the text using pdf.js
     if (fileData) {
       const pdfBytes = decode(fileData);
-      const data = await pdf(pdfBytes);
-      researchText = data.text;
+      const doc = await pdfjs.getDocument({ data: pdfBytes }).promise;
+      const numPages = doc.numPages;
+      let fullText = '';
+      for (let i = 1; i <= numPages; i++) {
+        const page = await doc.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => (item as any).str).join(' ');
+        fullText += pageText + '\n';
+      }
+      researchText = fullText;
     }
 
     if (!researchText) {
@@ -35,7 +47,6 @@ serve(async (req) => {
       });
     }
     
-    // Use the detailed analysis prompt for PDFs, or create a simpler one for text
     let finalPrompt = prompt;
     if (!fileData && content) {
       finalPrompt = `You are a research assistant. Summarize the following text in a ${tone} tone.`;
@@ -70,7 +81,7 @@ serve(async (req) => {
       status: 200,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Edge function error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
