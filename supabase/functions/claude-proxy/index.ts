@@ -1,3 +1,14 @@
+// These declarations are added to satisfy the TypeScript compiler in a non-Deno environment.
+declare module "https://deno.land/std@0.190.0/http/server.ts" {
+  export function serve(handler: (req: Request) => Response | Promise<Response>): void;
+}
+
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
+
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 
 const corsHeaders = {
@@ -6,6 +17,7 @@ const corsHeaders = {
 };
 
 const MAX_CONTENT_LENGTH = 150000;
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper.
 
@@ -122,74 +134,97 @@ Use this exact structure for your output:
 
 **Here is the structured input from multiple papers:**`;
 
+async function callClaude(finalPrompt: string, claudeApiKey: string) {
+  const claudeApiUrl = "https://api.anthropic.com/v1/messages";
+  const apiResponse = await fetch(claudeApiUrl, {
+    method: 'POST',
+    headers: {
+      'x-api-key': claudeApiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 4096,
+      temperature: 0.0,
+      messages: [{ role: 'user', content: finalPrompt }],
+    }),
+  });
+
+  if (!apiResponse.ok) {
+    const errorBody = await apiResponse.text();
+    console.error("Claude API Error:", errorBody);
+    throw new Error(`External API Error: Claude API request failed with status ${apiResponse.status}.`);
+  }
+
+  const claudeData = await apiResponse.json();
+  return claudeData.content[0].text;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    let { content, prompt, tone, mode } = await req.json();
-    console.log(`Received content with length: ${content?.length || 0}, mode: ${mode}`);
-
+    const { content, pdfs, mode, tone } = await req.json();
     const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
     if (!claudeApiKey) {
       throw new Error("Server configuration error: CLAUDE_API_KEY secret is not set.");
     }
 
-    if (!content) {
-      return new Response(JSON.stringify({ error: 'No content provided to analyze.' }), {
+    // Mode 1: Simple text summarization
+    if (mode === 'summarize_text') {
+      const finalPrompt = `You are a research assistant. Summarize the following text in a ${tone} tone.\n\nHere is the text to analyze:\n\n${content}`;
+      const summary = await callClaude(finalPrompt, claudeApiKey);
+      return new Response(JSON.stringify({ summary }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
+        status: 200,
       });
     }
 
-    if (content.length > MAX_CONTENT_LENGTH) {
-      console.warn(`Content length (${content.length}) exceeds maximum of ${MAX_CONTENT_LENGTH}. Truncating.`);
-      content = content.substring(0, MAX_CONTENT_LENGTH);
-    }
-    
-    let finalPrompt;
-    switch (mode) {
-      case 'extract':
-        finalPrompt = `${PDF_ANALYSIS_PROMPT}\n\nHere is the text to analyze:\n\n${content}`;
-        break;
-      case 'synthesize':
-        finalPrompt = `${SYNTHESIS_PROMPT}\n\n${content}`;
-        break;
-      default:
-        finalPrompt = `${prompt || `You are a research assistant. Summarize the following text in a ${tone} tone.`}\n\nHere is the text to analyze:\n\n${content}`;
-        break;
-    }
+    // Mode 2: Full PDF extraction and synthesis
+    if (mode === 'extract_and_synthesize' && pdfs && pdfs.length > 0) {
+      const extractions = [];
+      for (const [index, pdf] of pdfs.entries()) {
+        let contentToProcess = pdf.content;
+        if (contentToProcess.length > MAX_CONTENT_LENGTH) {
+          console.warn(`Content from ${pdf.name} is too long and is being truncated.`);
+          contentToProcess = contentToProcess.substring(0, MAX_CONTENT_LENGTH);
+        }
+        
+        const extractionPrompt = `${PDF_ANALYSIS_PROMPT}\n\nHere is the text to analyze:\n\n${contentToProcess}`;
+        console.log(`[SERVER] Starting extraction for: ${pdf.name}`);
+        const summary = await callClaude(extractionPrompt, claudeApiKey);
+        extractions.push({ name: pdf.name, summary });
+        console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
 
-    const claudeApiUrl = "https://api.anthropic.com/v1/messages";
-    const apiResponse = await fetch(claudeApiUrl, {
-      method: 'POST',
-      headers: {
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-sonnet-20240620",
-        max_tokens: 4096,
-        temperature: 0.0,
-        messages: [{ role: 'user', content: finalPrompt }],
-      }),
-    });
+        if (index < pdfs.length - 1) {
+          console.log(`[SERVER] Waiting 2.5s before next request...`);
+          await delay(2500);
+        }
+      }
 
-    if (!apiResponse.ok) {
-      const errorBody = await apiResponse.text();
-      console.error("Claude API Error:", errorBody);
-      throw new Error(`External API Error: Claude API request failed with status ${apiResponse.status}.`);
+      const combinedExtractions = extractions
+        .map(ext => `--- Paper: ${ext.name} ---\n\n${ext.summary}`)
+        .join('\n\n');
+      
+      console.log("[SERVER] Starting synthesis...");
+      const synthesisPrompt = `${SYNTHESIS_PROMPT}\n\n${combinedExtractions}`;
+      const synthesisResult = await callClaude(synthesisPrompt, claudeApiKey);
+      console.log("[SERVER] Synthesis complete.");
+
+      return new Response(JSON.stringify({ extractions, synthesisResult }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
     }
 
-    const claudeData = await apiResponse.json();
-    const summary = claudeData.content[0].text;
-
-    return new Response(JSON.stringify({ summary }), {
+    return new Response(JSON.stringify({ error: 'Invalid request mode or missing parameters.' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+      status: 400,
     });
+
   } catch (error) {
     console.error("Edge function execution error:", error);
     return new Response(JSON.stringify({ error: error.message }), {

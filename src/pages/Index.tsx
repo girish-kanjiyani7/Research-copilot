@@ -17,11 +17,8 @@ import workerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url';
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const MAX_CONTENT_LENGTH = 150000; // Sync with edge function
 
-type AnalysisPhase = 'idle' | 'extracting' | 'synthesizing' | 'complete' | 'error';
-
-const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+type AnalysisPhase = 'idle' | 'processing' | 'complete' | 'error';
 
 const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
@@ -33,7 +30,6 @@ const Index = () => {
   const [extractions, setExtractions] = useState<{ name: string; summary: string }[]>([]);
   const [synthesisResult, setSynthesisResult] = useState<string | null>(null);
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('idle');
-  const [extractionProgress, setExtractionProgress] = useState({ completed: 0, total: 0 });
 
   const [isParsing, setIsParsing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,143 +108,56 @@ const Index = () => {
   const handleGenerate = async () => {
     setExtractions([]);
     setSynthesisResult(null);
-    setAnalysisPhase('idle');
-    setExtractionProgress({ completed: 0, total: 0 });
+    setAnalysisPhase('processing');
 
     const textContent = content.trim();
     const pdfsToProcess = parsedPdfs;
 
     if (!textContent && pdfsToProcess.length === 0) {
       showError("There is no content to analyze.");
+      setAnalysisPhase('idle');
       return;
     }
 
-    // Case 1: Only text content, no PDFs. Use simple summarization.
-    if (textContent && pdfsToProcess.length === 0) {
-      setAnalysisPhase('synthesizing');
-      try {
+    try {
+      // Case 1: Only text content, no PDFs. Use simple summarization.
+      if (textContent && pdfsToProcess.length === 0) {
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
-          body: { content: textContent, tone: tone },
+          body: { content: textContent, tone: tone, mode: 'summarize_text' },
         });
         if (error) throw error;
         if (data.error) throw new Error(data.error);
         setSynthesisResult(data.summary);
-        setAnalysisPhase('complete');
-      } catch (error: any) {
-        showError(`Analysis failed: ${error.message}`);
-        setAnalysisPhase('error');
-      }
-      return;
-    }
-
-    // Case 2: PDFs are present. Start extraction phase.
-    setAnalysisPhase('extracting');
-    setExtractionProgress({ completed: 0, total: pdfsToProcess.length });
-
-    const allExtractionsResult: { name: string; summary: string }[] = [];
-    let errorCount = 0;
-
-    for (const [index, pdf] of pdfsToProcess.entries()) {
-      try {
-        let contentToProcess = pdf.content;
-        if (contentToProcess.length > MAX_CONTENT_LENGTH) {
-          console.warn(`Content from ${pdf.name} is too long (${contentToProcess.length} chars) and is being truncated to ${MAX_CONTENT_LENGTH} chars.`);
-          contentToProcess = contentToProcess.substring(0, MAX_CONTENT_LENGTH);
-        }
-
-        console.log(`Starting extraction for: ${pdf.name}`);
+        showSuccess("Summary generated!");
+      } 
+      // Case 2: PDFs are present. Use batch extraction and synthesis.
+      else if (pdfsToProcess.length > 0) {
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
-          body: { content: contentToProcess, mode: 'extract' },
+          body: { pdfs: pdfsToProcess, mode: 'extract_and_synthesize' },
         });
-
-        if (error) {
-          throw new Error(`Function invocation failed: ${error.message}`);
-        }
-        if (data && data.error) {
-          throw new Error(`Extraction error from API: ${data.error}`);
-        }
-        if (!data || !data.summary) {
-          throw new Error("Extraction returned no summary.");
-        }
-
-        console.log(`Successfully extracted: ${pdf.name}`);
-        allExtractionsResult.push({ name: pdf.name, summary: data.summary });
-
-      } catch (e: any) {
-        errorCount++;
-        console.error(`An error occurred while processing ${pdf.name}:`, e);
-        showError(`Failed to process ${pdf.name}. See console for details.`);
-      } finally {
-        setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+        
+        setExtractions(data.extractions || []);
+        setSynthesisResult(data.synthesisResult || null);
+        showSuccess("Analysis complete!");
       }
-
-      if (index < pdfsToProcess.length - 1) {
-        console.log(`[DELAY] Waiting 1.5s before next request...`);
-        await delay(1500);
-      }
-    }
-    
-    setExtractions(allExtractionsResult);
-
-    if (errorCount > 0) {
-      showError(`Synthesis cancelled: ${errorCount} of ${pdfsToProcess.length} PDF(s) failed to extract.`);
+      setAnalysisPhase('complete');
+    } catch (error: any) {
+      console.error("An error occurred during analysis:", error);
+      showError(`Analysis failed: ${error.message}`);
       setAnalysisPhase('error');
-      return;
     }
-    
-    if (pdfsToProcess.length > 0) {
-      showSuccess("All PDFs extracted successfully!");
-    }
-
-    // Phase 2: Synthesis
-    if (allExtractionsResult.length > 0) {
-      setAnalysisPhase('synthesizing');
-      try {
-        const combinedExtractions = allExtractionsResult
-          .map(ext => `--- Paper: ${ext.name} ---\n\n${ext.summary}`)
-          .join('\n\n');
-
-        console.log("Starting synthesis with combined extractions...");
-        const { data, error } = await supabase.functions.invoke('claude-proxy', {
-          body: { content: combinedExtractions, mode: 'synthesize' },
-        });
-
-        if (error) {
-          throw new Error(`Function invocation failed: ${error.message}`);
-        }
-        if (data && data.error) {
-          throw new Error(`Synthesis error from API: ${data.error}`);
-        }
-        if (!data || !data.summary) {
-          throw new Error("Synthesis returned no summary.");
-        }
-
-        console.log("Successfully synthesized results.");
-        setSynthesisResult(data.summary);
-        showSuccess("Synthesis complete!");
-
-      } catch (e: any) {
-        console.error("An error occurred during synthesis:", e);
-        showError(`Synthesis failed: ${e.message}`);
-        setAnalysisPhase('error');
-        return;
-      }
-    }
-
-    setAnalysisPhase('complete');
   };
 
   const getButtonText = () => {
-    if (analysisPhase === 'extracting') {
-      return `Extracting (${extractionProgress.completed}/${extractionProgress.total})...`;
-    }
-    if (analysisPhase === 'synthesizing') {
-      return 'Synthesizing...';
+    if (analysisPhase === 'processing') {
+      return 'Processing...';
     }
     return 'Generate Summary';
   };
   
-  const isLoading = analysisPhase === 'extracting' || analysisPhase === 'synthesizing';
+  const isLoading = analysisPhase === 'processing' || isParsing;
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -284,7 +193,7 @@ const Index = () => {
               className="min-h-[200px] rounded-md"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              disabled={isParsing || isLoading}
+              disabled={isLoading}
             />
              <input
               type="file"
@@ -295,7 +204,7 @@ const Index = () => {
               multiple
             />
             <div className="pt-2">
-              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isParsing || isLoading || parsedPdfs.length >= MAX_FILES}>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isLoading || parsedPdfs.length >= MAX_FILES}>
                   {isParsing ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -311,7 +220,7 @@ const Index = () => {
                   {parsedPdfs.map((pdf) => (
                     <div key={pdf.name} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded-md">
                       <span className="truncate max-w-xs font-medium">{pdf.name}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removePdf(pdf.name)} disabled={isParsing || isLoading}>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removePdf(pdf.name)} disabled={isLoading}>
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
@@ -339,7 +248,7 @@ const Index = () => {
                 </div>
               </RadioGroup>
             </div>
-            <Button onClick={handleGenerate} disabled={isLoading || isParsing || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
+            <Button onClick={handleGenerate} disabled={isLoading || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {getButtonText()}
             </Button>
