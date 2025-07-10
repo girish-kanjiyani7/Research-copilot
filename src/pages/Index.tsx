@@ -195,12 +195,42 @@ const Index = () => {
       showSuccess("All PDFs extracted successfully!");
     }
 
-    setAnalysisPhase('complete');
+    // Phase 2: Synthesis
+    if (allExtractions.length > 0) {
+      setAnalysisPhase('synthesizing');
+      try {
+        const combinedExtractions = allExtractions
+          .map(ext => `--- Paper: ${ext.name} ---\n\n${ext.summary}`)
+          .join('\n\n');
 
-    /*
-    // Phase 2: Synthesis (Temporarily Disabled)
-    // ...
-    */
+        console.log("Starting synthesis with combined extractions...");
+        const { data, error } = await supabase.functions.invoke('claude-proxy', {
+          body: { content: combinedExtractions, mode: 'synthesize' },
+        });
+
+        if (error) {
+          throw new Error(`Function invocation failed: ${error.message}`);
+        }
+        if (data && data.error) {
+          throw new Error(`Synthesis error from API: ${data.error}`);
+        }
+        if (!data || !data.summary) {
+          throw new Error("Synthesis returned no summary.");
+        }
+
+        console.log("Successfully synthesized results.");
+        setSynthesisResult(data.summary);
+        showSuccess("Synthesis complete!");
+
+      } catch (e: any) {
+        console.error("An error occurred during synthesis:", e);
+        showError(`Synthesis failed: ${e.message}`);
+        setAnalysisPhase('error');
+        return;
+      }
+    }
+
+    setAnalysisPhase('complete');
   };
 
   const getButtonText = () => {
