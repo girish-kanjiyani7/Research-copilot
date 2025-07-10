@@ -7,82 +7,18 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { FileUp, X, Loader2 } from "lucide-react";
 import { showError, showSuccess } from "@/utils/toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
-
-const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper.
-
-Your task is to extract and organize all essential scientific information from the paper, **without missing any key details**, especially from the methods and results.
-
-Follow this format strictly:
-
----
-
-**Title:**  
-[Extracted]
-
-**Authors:**  
-[Extracted if available]
-
-**Journal/DOI:**  
-[Extracted if available]
-
----
-
-### 1. Research Question  
-- What problem is being investigated?
-
-### 2. Background  
-- Prior context, motivation, previous gaps
-
-### 3. Methodology  
-Include:
-- Study type (e.g., RCT, observational, simulation)
-- Sample size and characteristics
-- Data collection tools, procedures
-- Controls, variables, models
-
-### 4. Key Findings  
-- All experimental results
-- Quantitative outcomes, effect sizes, statistical metrics (e.g. p-values)
-- Any differences across groups or conditions
-
-### 5. Conclusions  
-- What the authors claim based on their results
-
-### 6. Limitations  
-- Any constraints or cautions mentioned
-
-### 7. Future Directions  
-- Any proposed next steps or open questions
-
----
-
-**Instructions:**
-- Be exhaustive and precise
-- Do NOT skip anything, especially in methods or findings
-- If a section is not present, write “Not stated”
-- Use bullet points when listing multiple items`;
-
-const MULTI_PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of multiple research papers. Your task is to synthesize the information from all documents. 
-
-**Instructions:**
-1.  For each document, create a separate section starting with its name (e.g., "### Analysis of: [Document Name]").
-2.  Within each section, provide a structured summary following the detailed format below.
-3.  After analyzing all documents individually, add a final "### Synthesis" section.
-4.  In the "Synthesis" section, compare and contrast the key findings, methodologies, and conclusions from all papers.
-
----
-${PDF_ANALYSIS_PROMPT}
-`;
-
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+type AnalysisPhase = 'idle' | 'extracting' | 'synthesizing' | 'complete' | 'error';
 
 const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
@@ -90,8 +26,12 @@ const Index = () => {
   const [content, setContent] = useState("");
   const [parsedPdfs, setParsedPdfs] = useState<{ name: string; content: string }[]>([]);
   const [tone, setTone] = useState("academic");
-  const [results, setResults] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  
+  const [extractions, setExtractions] = useState<{ name: string; summary: string }[]>([]);
+  const [synthesisResult, setSynthesisResult] = useState<string | null>(null);
+  const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('idle');
+  const [extractionProgress, setExtractionProgress] = useState({ completed: 0, total: 0 });
+
   const [isParsing, setIsParsing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -167,48 +107,116 @@ const Index = () => {
   };
 
   const handleGenerate = async () => {
-    const pdfsContent = parsedPdfs.map(p => `--- Document: ${p.name} ---\n${p.content}`).join('\n\n');
-    const analysisContent = [pdfsContent, content].filter(Boolean).join('\n\n');
+    setExtractions([]);
+    setSynthesisResult(null);
+    setAnalysisPhase('idle');
+    setExtractionProgress({ completed: 0, total: 0 });
 
-    if (!analysisContent) {
+    const textContent = content.trim();
+    const pdfsToProcess = parsedPdfs;
+
+    if (!textContent && pdfsToProcess.length === 0) {
       showError("There is no content to analyze.");
       return;
     }
-    setIsLoading(true);
-    setResults(null);
+
+    // Case 1: Only text content, no PDFs. Use simple summarization.
+    if (textContent && pdfsToProcess.length === 0) {
+      setAnalysisPhase('synthesizing');
+      try {
+        const { data, error } = await supabase.functions.invoke('claude-proxy', {
+          body: { content: textContent, tone: tone },
+        });
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+        setSynthesisResult(data.summary);
+        setAnalysisPhase('complete');
+      } catch (error: any) {
+        showError(`Analysis failed: ${error.message}`);
+        setAnalysisPhase('error');
+      }
+      return;
+    }
+
+    // Case 2: PDFs are present. Start two-phase process.
+    // Phase 1: Extraction
+    setAnalysisPhase('extracting');
+    setExtractionProgress({ completed: 0, total: pdfsToProcess.length });
+
+    const extractionPromises = pdfsToProcess.map(pdf =>
+      supabase.functions.invoke('claude-proxy', {
+        body: { content: pdf.content, mode: 'extract' },
+      }).then(response => {
+        setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
+        return { ...response, pdfName: pdf.name };
+      })
+    );
+
+    const extractionResults = await Promise.allSettled(extractionPromises);
+    const successfulExtractions: { name: string; summary: string }[] = [];
+    let extractionErrors = 0;
+
+    extractionResults.forEach(result => {
+      if (result.status === 'fulfilled') {
+        const { data, error, pdfName } = result.value;
+        if (error || data.error) {
+          extractionErrors++;
+          console.error(`Extraction failed for ${pdfName}:`, error || data.error);
+        } else {
+          successfulExtractions.push({ name: pdfName, summary: data.summary });
+        }
+      } else {
+        extractionErrors++;
+        console.error(`Extraction promise rejected:`, result.reason);
+      }
+    });
+
+    setExtractions(successfulExtractions);
+
+    if (extractionErrors > 0) {
+      showError(`Failed to extract ${extractionErrors} PDF(s). Synthesis will proceed with the successful ones.`);
+    }
+    
+    if (successfulExtractions.length === 0) {
+      showError("No PDF extractions were successful. Cannot proceed to synthesis.");
+      setAnalysisPhase('error');
+      return;
+    }
+
+    // Phase 2: Synthesis
+    setAnalysisPhase('synthesizing');
+    const combinedExtractions = successfulExtractions
+      .map(e => `--- Analysis of: ${e.name} ---\n\n${e.summary}`)
+      .join('\n\n---\n\n');
+    
+    const synthesisContent = [textContent, combinedExtractions].filter(Boolean).join('\n\n');
 
     try {
-      const isPdfAnalysis = parsedPdfs.length > 0;
-      let finalPrompt;
-      if (isPdfAnalysis) {
-        finalPrompt = parsedPdfs.length > 1 ? MULTI_PDF_ANALYSIS_PROMPT : PDF_ANALYSIS_PROMPT;
-      } else {
-        finalPrompt = `You are a research assistant. Summarize the following text in a ${tone} tone.`;
-      }
-
-      const bodyPayload = {
-        content: analysisContent,
-        prompt: finalPrompt,
-        tone: isPdfAnalysis ? 'academic' : tone,
-      };
-
       const { data, error } = await supabase.functions.invoke('claude-proxy', {
-        body: bodyPayload,
+        body: { content: synthesisContent, mode: 'synthesize' },
       });
-
       if (error) throw error;
       if (data.error) throw new Error(data.error);
-
-      setResults(data.summary);
-
+      setSynthesisResult(data.summary);
     } catch (error: any) {
-      console.error("API call failed:", error);
-      const errorMessage = error?.context?.error?.message || error.message || "An unknown error occurred.";
-      showError(`Analysis failed: ${errorMessage}`);
+      showError(`Synthesis failed: ${error.message}`);
+      setAnalysisPhase('error');
     } finally {
-      setIsLoading(false);
+      setAnalysisPhase('complete');
     }
   };
+
+  const getButtonText = () => {
+    if (analysisPhase === 'extracting') {
+      return `Extracting (${extractionProgress.completed}/${extractionProgress.total})...`;
+    }
+    if (analysisPhase === 'synthesizing') {
+      return 'Synthesizing...';
+    }
+    return 'Generate Summary';
+  };
+  
+  const isLoading = analysisPhase === 'extracting' || analysisPhase === 'synthesizing';
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -244,7 +252,7 @@ const Index = () => {
               className="min-h-[200px] rounded-md"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              disabled={isParsing}
+              disabled={isParsing || isLoading}
             />
              <input
               type="file"
@@ -255,7 +263,7 @@ const Index = () => {
               multiple
             />
             <div className="pt-2">
-              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isParsing || parsedPdfs.length >= MAX_FILES}>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isParsing || isLoading || parsedPdfs.length >= MAX_FILES}>
                   {isParsing ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -271,7 +279,7 @@ const Index = () => {
                   {parsedPdfs.map((pdf) => (
                     <div key={pdf.name} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded-md">
                       <span className="truncate max-w-xs font-medium">{pdf.name}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removePdf(pdf.name)} disabled={isParsing}>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removePdf(pdf.name)} disabled={isParsing || isLoading}>
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
@@ -284,7 +292,7 @@ const Index = () => {
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-2">
               <Label>Select Tone</Label>
-              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={parsedPdfs.length > 0}>
+              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={parsedPdfs.length > 0 || isLoading}>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="academic" id="r1" />
                   <Label htmlFor="r1">Academic</Label>
@@ -300,21 +308,46 @@ const Index = () => {
               </RadioGroup>
             </div>
             <Button onClick={handleGenerate} disabled={isLoading || isParsing || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
-              {isLoading ? "Generating..." : "Generate Summary"}
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {getButtonText()}
             </Button>
           </div>
         </div>
 
-        {results && (
+        {(extractions.length > 0 || synthesisResult) && (
           <div className="space-y-8 pt-8 border-t max-w-4xl mx-auto">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold">Analysis Results</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{results}</div>
-              </CardContent>
-            </Card>
+            {extractions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl font-bold">Individual Paper Extractions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Accordion type="single" collapsible className="w-full">
+                    {extractions.map((extraction, index) => (
+                      <AccordionItem value={`item-${index}`} key={extraction.name}>
+                        <AccordionTrigger>{extraction.name}</AccordionTrigger>
+                        <AccordionContent>
+                          <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{extraction.summary}</div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                </CardContent>
+              </Card>
+            )}
+
+            {synthesisResult && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl font-bold">
+                    {parsedPdfs.length > 0 ? "Synthesized Analysis" : "Summary"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{synthesisResult}</div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </main>
