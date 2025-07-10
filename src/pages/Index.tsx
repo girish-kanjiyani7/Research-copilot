@@ -191,8 +191,12 @@ const Index = () => {
     setExtractions(allExtractionsResult);
 
     if (errorCount > 0) {
-      showError(`Completed with ${errorCount} error(s).`);
-    } else if (pdfsToProcess.length > 0) {
+      showError(`Synthesis cancelled: ${errorCount} of ${pdfsToProcess.length} PDF(s) failed to extract.`);
+      setAnalysisPhase('error');
+      return;
+    }
+    
+    if (pdfsToProcess.length > 0) {
       showSuccess("All PDFs extracted successfully!");
     }
 
