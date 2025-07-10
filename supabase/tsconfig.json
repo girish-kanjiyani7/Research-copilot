@@ -1,9 +1,21 @@
 {
   "compilerOptions": {
-    "lib": ["deno.ns", "dom"],
     "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["https://esm.sh/@supabase/functions-js@2"],
     "strict": true,
-    "noEmit": true
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowJs": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "https://esm.sh/react"
   },
-  "include": ["./functions/**/*.ts"]
+  "include": [
+    "./functions/**/*.ts"
+  ],
+  "exclude": [
+    "../node_modules"
+  ]
 }
