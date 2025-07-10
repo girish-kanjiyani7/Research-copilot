@@ -152,13 +152,18 @@ const Index = () => {
       });
 
       if (error) throw error;
+      
+      // The edge function now returns a JSON with an `error` key on failure
       if (data.error) throw new Error(data.error);
 
       setResults(data.summary);
 
     } catch (error: any) {
       console.error("API call failed:", error);
-      showError(error.message || "There was an error generating the summary.");
+      // The detailed error from the function is often in `error.context.error` for network errors,
+      // or in `error.message` if we throw it from the `data.error` check above.
+      const errorMessage = error?.context?.error?.message || error.message || "An unknown error occurred.";
+      showError(`Analysis failed: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }

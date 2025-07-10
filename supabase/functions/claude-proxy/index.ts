@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { decode } from "https://deno.land/std@0.190.0/encoding/base64.ts";
-// Use the legacy build of pdf.js to avoid worker-related crashes in the Deno environment.
 import * as pdfjs from "https://esm.sh/pdfjs-dist@4.4.168/legacy/build/pdf.mjs";
 
 const corsHeaders = {
@@ -16,33 +15,33 @@ serve(async (req) => {
   try {
     const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
     if (!claudeApiKey) {
-      throw new Error("CLAUDE_API_KEY is not set in your project's secrets.");
+      throw new Error("Server configuration error: CLAUDE_API_KEY secret is not set.");
     }
 
     const { fileData, prompt, content, tone } = await req.json();
     let researchText = content;
 
     if (fileData) {
-      const pdfBytes = decode(fileData);
-      // Use the legacy build and explicitly disable the worker for maximum compatibility.
-      const doc = await pdfjs.getDocument({ 
-          data: pdfBytes,
-          disableWorker: true 
-      }).promise;
-      
-      const numPages = doc.numPages;
-      let fullText = '';
-      for (let i = 1; i <= numPages; i++) {
-        const page = await doc.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => (item as { str: string }).str).join(' ');
-        fullText += pageText + '\n';
+      try {
+        const pdfBytes = decode(fileData);
+        const doc = await pdfjs.getDocument({ data: pdfBytes, disableWorker: true }).promise;
+        
+        let fullText = '';
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => (item as { str: string }).str).join(' ');
+          fullText += pageText + '\n';
+        }
+        researchText = fullText;
+      } catch (pdfError) {
+        console.error("PDF Parsing Error:", pdfError);
+        throw new Error(`Failed to parse PDF file. Details: ${pdfError.message}`);
       }
-      researchText = fullText;
     }
 
     if (!researchText) {
-      return new Response(JSON.stringify({ error: 'No content provided to analyze.' }), {
+      return new Response(JSON.stringify({ error: 'No content or file provided to analyze.' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -71,7 +70,7 @@ serve(async (req) => {
     if (!apiResponse.ok) {
       const errorBody = await apiResponse.text();
       console.error("Claude API Error:", errorBody);
-      throw new Error(`Claude API request failed with status ${apiResponse.status}`);
+      throw new Error(`External API Error: Claude API request failed with status ${apiResponse.status}.`);
     }
 
     const claudeData = await apiResponse.json();
@@ -82,7 +81,7 @@ serve(async (req) => {
       status: 200,
     });
   } catch (error) {
-    console.error("Edge function error:", error);
+    console.error("Edge function execution error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
