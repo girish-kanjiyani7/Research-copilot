@@ -159,31 +159,35 @@ const Index = () => {
     extractionResults.forEach(result => {
       if (result.status === 'fulfilled') {
         const { data, error, pdfName } = result.value;
-        if (error || data.error) {
+        if (error || (data && data.error)) {
           extractionErrors++;
-          console.error(`Extraction failed for ${pdfName}:`, error || data.error);
+          console.error(`Extraction failed for ${pdfName}:`, error || (data && data.error));
         } else {
           successfulExtractions.push({ name: pdfName, summary: data.summary });
         }
       } else {
         extractionErrors++;
-        console.error(`Extraction promise rejected:`, result.reason);
+        console.error(`Extraction promise rejected for one of the PDFs:`, result.reason);
       }
     });
 
     setExtractions(successfulExtractions);
 
     if (extractionErrors > 0) {
-      showError(`Failed to extract ${extractionErrors} PDF(s). Synthesis will proceed with the successful ones.`);
+      showError(`Failed to extract ${extractionErrors} PDF(s). Check the console for details.`);
     }
     
-    if (successfulExtractions.length === 0) {
-      showError("No PDF extractions were successful. Cannot proceed to synthesis.");
+    if (successfulExtractions.length === 0 && pdfsToProcess.length > 0) {
+      showError("No PDF extractions were successful. Cannot proceed.");
       setAnalysisPhase('error');
       return;
     }
 
-    // Phase 2: Synthesis
+    // The process will now stop here. The synthesis phase below is temporarily disabled for debugging.
+    setAnalysisPhase('complete');
+
+    /*
+    // Phase 2: Synthesis (Temporarily Disabled)
     setAnalysisPhase('synthesizing');
     const combinedExtractions = successfulExtractions
       .map(e => `--- Analysis of: ${e.name} ---\n\n${e.summary}`)
@@ -204,6 +208,7 @@ const Index = () => {
     } finally {
       setAnalysisPhase('complete');
     }
+    */
   };
 
   const getButtonText = () => {
