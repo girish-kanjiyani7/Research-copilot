@@ -68,6 +68,19 @@ Include:
 - If a section is not present, write “Not stated”
 - Use bullet points when listing multiple items`;
 
+const MULTI_PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of multiple research papers. Your task is to synthesize the information from all documents. 
+
+**Instructions:**
+1.  For each document, create a separate section starting with its name (e.g., "### Analysis of: [Document Name]").
+2.  Within each section, provide a structured summary following the detailed format below.
+3.  After analyzing all documents individually, add a final "### Synthesis" section.
+4.  In the "Synthesis" section, compare and contrast the key findings, methodologies, and conclusions from all papers.
+
+---
+${PDF_ANALYSIS_PROMPT}
+`;
+
+const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
@@ -75,12 +88,11 @@ const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
   const [content, setContent] = useState("");
-  const [pdfContent, setPdfContent] = useState(""); // New state for PDF text
+  const [parsedPdfs, setParsedPdfs] = useState<{ name: string; content: string }[]>([]);
   const [tone, setTone] = useState("academic");
   const [results, setResults] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -88,53 +100,76 @@ const Index = () => {
   }, []);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-    if (file.type !== "application/pdf") {
-      showError("Please select a PDF file.");
+    const newFiles = Array.from(files);
+
+    if (parsedPdfs.length + newFiles.length > MAX_FILES) {
+      showError(`You can upload a maximum of ${MAX_FILES} files.`);
       return;
     }
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      showError(`File is too large. Please select a file smaller than ${MAX_FILE_SIZE_MB}MB.`);
-      return;
-    }
-
-    setSelectedFile(file);
     setIsParsing(true);
-    setContent(""); // Clear manual content
-    setPdfContent(""); // Clear previous PDF content
+    
+    const newlyParsedPdfs: { name: string; content: string }[] = [];
+    let hadError = false;
 
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-      let fullText = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => (item as any).str).join(' ');
-        fullText += pageText + '\n';
+    for (const file of newFiles) {
+      if (parsedPdfs.some(p => p.name === file.name)) {
+        showError(`File "${file.name}" is already uploaded and was skipped.`);
+        hadError = true;
+        continue;
       }
-      setPdfContent(fullText); // Store extracted text in separate state
-      showSuccess("Successfully parsed PDF. Ready to analyze.");
-    } catch (error) {
-      console.error("Failed to parse PDF:", error);
-      showError("Could not read text from the PDF file.");
-      clearFile();
-    } finally {
-      setIsParsing(false);
+      if (file.type !== "application/pdf") {
+        showError(`File "${file.name}" is not a PDF and was skipped.`);
+        hadError = true;
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        showError(`File "${file.name}" is too large and was skipped.`);
+        hadError = true;
+        continue;
+      }
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => (item as any).str).join(' ');
+          fullText += pageText + '\n';
+        }
+        newlyParsedPdfs.push({ name: file.name, content: fullText });
+      } catch (error) {
+        console.error(`Failed to parse PDF "${file.name}":`, error);
+        showError(`Could not read text from "${file.name}".`);
+        hadError = true;
+      }
     }
+
+    setParsedPdfs(prev => [...prev, ...newlyParsedPdfs]);
+    
+    if (!hadError && newlyParsedPdfs.length > 0) {
+        showSuccess(`Successfully parsed ${newlyParsedPdfs.length} new PDF(s).`);
+    } else if (newlyParsedPdfs.length > 0) {
+        showSuccess(`Parsed ${newlyParsedPdfs.length} PDF(s) with some warnings.`);
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setIsParsing(false);
   };
 
-  const clearFile = () => {
-    setSelectedFile(null);
-    setPdfContent("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const removePdf = (name: string) => {
+    setParsedPdfs(prev => prev.filter(pdf => pdf.name !== name));
   };
 
   const handleGenerate = async () => {
-    const analysisContent = pdfContent || content; // Prioritize PDF content
+    const pdfsContent = parsedPdfs.map(p => `--- Document: ${p.name} ---\n${p.content}`).join('\n\n');
+    const analysisContent = [pdfsContent, content].filter(Boolean).join('\n\n');
+
     if (!analysisContent) {
       showError("There is no content to analyze.");
       return;
@@ -143,10 +178,18 @@ const Index = () => {
     setResults(null);
 
     try {
+      const isPdfAnalysis = parsedPdfs.length > 0;
+      let finalPrompt;
+      if (isPdfAnalysis) {
+        finalPrompt = parsedPdfs.length > 1 ? MULTI_PDF_ANALYSIS_PROMPT : PDF_ANALYSIS_PROMPT;
+      } else {
+        finalPrompt = `You are a research assistant. Summarize the following text in a ${tone} tone.`;
+      }
+
       const bodyPayload = {
         content: analysisContent,
-        prompt: selectedFile ? PDF_ANALYSIS_PROMPT : `You are a research assistant. Summarize the following text in a ${tone} tone.`,
-        tone: selectedFile ? 'academic' : tone,
+        prompt: finalPrompt,
+        tone: isPdfAnalysis ? 'academic' : tone,
       };
 
       const { data, error } = await supabase.functions.invoke('claude-proxy', {
@@ -194,52 +237,54 @@ const Index = () => {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="abstracts">Paste links/abstracts or upload a PDF</Label>
+            <Label htmlFor="abstracts">Paste links/abstracts and/or upload PDFs</Label>
             <Textarea
               id="abstracts"
-              placeholder={isParsing ? "Reading text from PDF..." : "Paste content here, or upload a PDF to analyze."}
+              placeholder="Paste content here..."
               className="min-h-[200px] rounded-md"
               value={content}
-              onChange={(e) => {
-                setContent(e.target.value);
-                // If user starts typing, assume they no longer want to use the PDF.
-                if (selectedFile) {
-                  clearFile();
-                }
-              }}
+              onChange={(e) => setContent(e.target.value)}
               disabled={isParsing}
             />
-            <input
+             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileChange}
               accept="application/pdf"
               className="hidden"
+              multiple
             />
-            <div className="flex items-center justify-between pt-2">
-                <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isParsing}>
-                    {isParsing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                        <FileUp className="mr-2 h-4 w-4" />
-                    )}
-                    Attach PDF
-                </Button>
-                {selectedFile && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span className="truncate max-w-xs">{selectedFile.name}</span>
-                        <Button variant="ghost" size="icon" onClick={clearFile} disabled={isParsing}>
-                            <X className="h-4 w-4" />
-                        </Button>
-                    </div>
-                )}
+            <div className="pt-2">
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isParsing || parsedPdfs.length >= MAX_FILES}>
+                  {isParsing ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                      <FileUp className="mr-2 h-4 w-4" />
+                  )}
+                  Attach PDF ({parsedPdfs.length}/{MAX_FILES})
+              </Button>
             </div>
+            {parsedPdfs.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <Label>Attached PDFs</Label>
+                <div className="space-y-1 rounded-md border p-2">
+                  {parsedPdfs.map((pdf) => (
+                    <div key={pdf.name} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded-md">
+                      <span className="truncate max-w-xs font-medium">{pdf.name}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removePdf(pdf.name)} disabled={isParsing}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-2">
               <Label>Select Tone</Label>
-              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={!!selectedFile}>
+              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={parsedPdfs.length > 0}>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="academic" id="r1" />
                   <Label htmlFor="r1">Academic</Label>
@@ -254,7 +299,7 @@ const Index = () => {
                 </div>
               </RadioGroup>
             </div>
-            <Button onClick={handleGenerate} disabled={isLoading || isParsing || (!content && !pdfContent)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
+            <Button onClick={handleGenerate} disabled={isLoading || isParsing || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
               {isLoading ? "Generating..." : "Generate Summary"}
             </Button>
           </div>
