@@ -75,6 +75,7 @@ const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
   const [content, setContent] = useState("");
+  const [pdfContent, setPdfContent] = useState(""); // New state for PDF text
   const [tone, setTone] = useState("academic");
   const [results, setResults] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -102,7 +103,8 @@ const Index = () => {
 
     setSelectedFile(file);
     setIsParsing(true);
-    setContent(""); // Clear previous content
+    setContent(""); // Clear manual content
+    setPdfContent(""); // Clear previous PDF content
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -114,8 +116,8 @@ const Index = () => {
         const pageText = textContent.items.map(item => (item as any).str).join(' ');
         fullText += pageText + '\n';
       }
-      setContent(fullText);
-      showSuccess("Successfully extracted text from PDF.");
+      setPdfContent(fullText); // Store extracted text in separate state
+      showSuccess("Successfully parsed PDF. Ready to analyze.");
     } catch (error) {
       console.error("Failed to parse PDF:", error);
       showError("Could not read text from the PDF file.");
@@ -127,12 +129,13 @@ const Index = () => {
 
   const clearFile = () => {
     setSelectedFile(null);
-    setContent("");
+    setPdfContent("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleGenerate = async () => {
-    if (!content) {
+    const analysisContent = pdfContent || content; // Prioritize PDF content
+    if (!analysisContent) {
       showError("There is no content to analyze.");
       return;
     }
@@ -141,7 +144,7 @@ const Index = () => {
 
     try {
       const bodyPayload = {
-        content,
+        content: analysisContent,
         prompt: selectedFile ? PDF_ANALYSIS_PROMPT : `You are a research assistant. Summarize the following text in a ${tone} tone.`,
         tone: selectedFile ? 'academic' : tone,
       };
@@ -194,12 +197,15 @@ const Index = () => {
             <Label htmlFor="abstracts">Paste links/abstracts or upload a PDF</Label>
             <Textarea
               id="abstracts"
-              placeholder={isParsing ? "Reading text from PDF..." : "Paste content here, or it will appear here after you select a PDF."}
+              placeholder={isParsing ? "Reading text from PDF..." : "Paste content here, or upload a PDF to analyze."}
               className="min-h-[200px] rounded-md"
               value={content}
               onChange={(e) => {
                 setContent(e.target.value);
-                if (selectedFile) setSelectedFile(null);
+                // If user starts typing, assume they no longer want to use the PDF.
+                if (selectedFile) {
+                  clearFile();
+                }
               }}
               disabled={isParsing}
             />
@@ -248,7 +254,7 @@ const Index = () => {
                 </div>
               </RadioGroup>
             </div>
-            <Button onClick={handleGenerate} disabled={isLoading || isParsing || !content} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
+            <Button onClick={handleGenerate} disabled={isLoading || isParsing || (!content && !pdfContent)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
               {isLoading ? "Generating..." : "Generate Summary"}
             </Button>
           </div>
