@@ -145,7 +145,7 @@ const Index = () => {
     setAnalysisPhase('extracting');
     setExtractionProgress({ completed: 0, total: pdfsToProcess.length });
 
-    const allExtractions: { name: string; summary: string }[] = [];
+    const allExtractionsResult: { name: string; summary: string }[] = [];
     let errorCount = 0;
 
     for (const [index, pdf] of pdfsToProcess.entries()) {
@@ -172,8 +172,7 @@ const Index = () => {
         }
 
         console.log(`Successfully extracted: ${pdf.name}`);
-        allExtractions.push({ name: pdf.name, summary: data.summary });
-        setExtractions([...allExtractions]);
+        allExtractionsResult.push({ name: pdf.name, summary: data.summary });
 
       } catch (e: any) {
         errorCount++;
@@ -184,11 +183,12 @@ const Index = () => {
       }
 
       if (index < pdfsToProcess.length - 1) {
-        console.log(`[DELAY] Starting 1.5s delay before processing next PDF...`);
+        console.log(`[DELAY] Waiting 1.5s before next request...`);
         await delay(1500);
-        console.log(`[DELAY] Delay finished. Proceeding.`);
       }
     }
+    
+    setExtractions(allExtractionsResult);
 
     if (errorCount > 0) {
       showError(`Completed with ${errorCount} error(s).`);
@@ -197,10 +197,10 @@ const Index = () => {
     }
 
     // Phase 2: Synthesis
-    if (allExtractions.length > 0) {
+    if (allExtractionsResult.length > 0) {
       setAnalysisPhase('synthesizing');
       try {
-        const combinedExtractions = allExtractions
+        const combinedExtractions = allExtractionsResult
           .map(ext => `--- Paper: ${ext.name} ---\n\n${ext.summary}`)
           .join('\n\n');
 
