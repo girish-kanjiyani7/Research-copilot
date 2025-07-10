@@ -1,1 +1,0 @@
-declare module 'https://deno.land/std@0.190.0/http/server.ts';

@@ -47,7 +47,7 @@ serve(async (req) => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: "claude-3-sonnet-20240229",
+        model: "claude-3-5-sonnet-20240620",
         max_tokens: 4096,
         messages: [{ role: 'user', content: `${finalPrompt}\n\nHere is the text to analyze:\n\n${content}` }],
       }),
