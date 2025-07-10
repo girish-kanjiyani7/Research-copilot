@@ -142,36 +142,45 @@ const Index = () => {
     setAnalysisPhase('extracting');
     setExtractionProgress({ completed: 0, total: pdfsToProcess.length });
 
-    const successfulExtractions: { name: string; summary: string }[] = [];
-    let extractionErrors = 0;
+    const allExtractions: { name: string; summary: string }[] = [];
+    let errorCount = 0;
 
     for (const pdf of pdfsToProcess) {
       try {
+        console.log(`Starting extraction for: ${pdf.name}`);
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
           body: { content: pdf.content, mode: 'extract' },
         });
 
-        if (error || (data && data.error)) {
-          throw new Error(error?.message || data?.error || 'Unknown extraction error');
+        if (error) {
+          throw new Error(`Function invocation failed: ${error.message}`);
+        }
+        if (data && data.error) {
+          throw new Error(`Extraction error from API: ${data.error}`);
+        }
+        if (!data || !data.summary) {
+          throw new Error("Extraction returned no summary.");
         }
 
-        successfulExtractions.push({ name: pdf.name, summary: data.summary });
-        setExtractions([...successfulExtractions]);
+        console.log(`Successfully extracted: ${pdf.name}`);
+        allExtractions.push({ name: pdf.name, summary: data.summary });
+        setExtractions([...allExtractions]);
 
       } catch (e: any) {
-        extractionErrors++;
-        console.error(`Extraction failed for ${pdf.name}:`, e);
+        errorCount++;
+        console.error(`An error occurred while processing ${pdf.name}:`, e);
+        showError(`Failed to process ${pdf.name}. See console for details.`);
       } finally {
         setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
       }
     }
 
-    if (extractionErrors > 0) {
-      showError(`Extraction failed for ${extractionErrors} PDF(s). Halting process for debugging. Please check the console for details.`);
-      setAnalysisPhase('error');
-      return;
+    if (errorCount > 0) {
+      showError(`Completed with ${errorCount} error(s).`);
+    } else if (pdfsToProcess.length > 0) {
+      showSuccess("All PDFs extracted successfully!");
     }
-    
+
     setAnalysisPhase('complete');
 
     /*
