@@ -5,13 +5,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Set a character limit to prevent crashes from payloads that are too large.
+// 150,000 chars is roughly 35k-40k tokens, well within model limits and safe for HTTP requests.
+const MAX_CONTENT_LENGTH = 150000;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { content, prompt, tone } = await req.json();
+    let { content, prompt, tone } = await req.json();
+    console.log(`Received content with length: ${content?.length || 0}`);
 
     const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
     if (!claudeApiKey) {
@@ -23,6 +28,12 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
+    }
+
+    // Truncate content if it exceeds the maximum allowed length.
+    if (content.length > MAX_CONTENT_LENGTH) {
+      console.warn(`Content length (${content.length}) exceeds maximum of ${MAX_CONTENT_LENGTH}. Truncating.`);
+      content = content.substring(0, MAX_CONTENT_LENGTH);
     }
     
     const finalPrompt = prompt || `You are a research assistant. Summarize the following text in a ${tone} tone.`;
