@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ExternalLink, FileUp, X } from "lucide-react";
+import { FileUp, X } from "lucide-react";
 import { showError } from "@/utils/toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -65,6 +65,9 @@ Include:
 - If a section is not present, write “Not stated”
 - Use bullet points when listing multiple items`;
 
+const MAX_FILE_SIZE_MB = 2;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
@@ -78,16 +81,26 @@ const Index = () => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      if (file.type === "application/pdf") {
-        setSelectedFile(file);
-        setContent(""); // Clear textarea when a file is selected
-      } else {
+      if (file.type !== "application/pdf") {
         showError("Please select a PDF file.");
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
+        return;
       }
+
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        showError(`File is too large. Please select a file smaller than ${MAX_FILE_SIZE_MB}MB.`);
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        return;
+      }
+
+      setSelectedFile(file);
+      setContent(""); // Clear textarea when a file is selected
     }
   };
 
