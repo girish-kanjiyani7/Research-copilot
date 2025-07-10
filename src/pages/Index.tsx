@@ -17,8 +17,11 @@ import workerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url';
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const MAX_CONTENT_LENGTH = 150000; // Sync with edge function
 
 type AnalysisPhase = 'idle' | 'extracting' | 'synthesizing' | 'complete' | 'error';
+
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
@@ -145,11 +148,17 @@ const Index = () => {
     const allExtractions: { name: string; summary: string }[] = [];
     let errorCount = 0;
 
-    for (const pdf of pdfsToProcess) {
+    for (const [index, pdf] of pdfsToProcess.entries()) {
       try {
+        let contentToProcess = pdf.content;
+        if (contentToProcess.length > MAX_CONTENT_LENGTH) {
+          console.warn(`Content from ${pdf.name} is too long (${contentToProcess.length} chars) and is being truncated to ${MAX_CONTENT_LENGTH} chars.`);
+          contentToProcess = contentToProcess.substring(0, MAX_CONTENT_LENGTH);
+        }
+
         console.log(`Starting extraction for: ${pdf.name}`);
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
-          body: { content: pdf.content, mode: 'extract' },
+          body: { content: contentToProcess, mode: 'extract' },
         });
 
         if (error) {
@@ -172,6 +181,11 @@ const Index = () => {
         showError(`Failed to process ${pdf.name}. See console for details.`);
       } finally {
         setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
+      }
+
+      if (index < pdfsToProcess.length - 1) {
+        console.log('Waiting 1.5s before next request to avoid rate limiting...');
+        await delay(1500);
       }
     }
 
