@@ -65,7 +65,7 @@ Include:
 - If a section is not present, write “Not stated”
 - Use bullet points when listing multiple items`;
 
-const MAX_FILE_SIZE_MB = 2;
+const MAX_FILE_SIZE_MB = 5; // Increased limit slightly
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const Index = () => {
@@ -84,43 +84,25 @@ const Index = () => {
       if (file.type !== "application/pdf") {
         showError("Please select a PDF file.");
         setSelectedFile(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+        if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
 
       if (file.size > MAX_FILE_SIZE_BYTES) {
         showError(`File is too large. Please select a file smaller than ${MAX_FILE_SIZE_MB}MB.`);
         setSelectedFile(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+        if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
 
       setSelectedFile(file);
-      setContent(""); // Clear textarea when a file is selected
+      setContent("");
     }
   };
 
   const clearFile = () => {
     setSelectedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = (error) => reject(error);
-    });
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleGenerate = async () => {
@@ -131,9 +113,19 @@ const Index = () => {
       let bodyPayload = {};
 
       if (selectedFile) {
-        const fileData = await fileToBase64(selectedFile);
+        const fileExt = selectedFile.name.split('.').pop();
+        const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('research-papers')
+          .upload(fileName, selectedFile);
+
+        if (uploadError) {
+          throw new Error(`Failed to upload file: ${uploadError.message}`);
+        }
+
         bodyPayload = {
-          fileData,
+          filePath: fileName,
           prompt: PDF_ANALYSIS_PROMPT,
         };
       } else if (content) {
@@ -152,16 +144,12 @@ const Index = () => {
       });
 
       if (error) throw error;
-      
-      // The edge function now returns a JSON with an `error` key on failure
       if (data.error) throw new Error(data.error);
 
       setResults(data.summary);
 
     } catch (error: any) {
       console.error("API call failed:", error);
-      // The detailed error from the function is often in `error.context.error` for network errors,
-      // or in `error.message` if we throw it from the `data.error` check above.
       const errorMessage = error?.context?.error?.message || error.message || "An unknown error occurred.";
       showError(`Analysis failed: ${errorMessage}`);
     } finally {
