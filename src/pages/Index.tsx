@@ -138,40 +138,35 @@ const Index = () => {
       return;
     }
 
-    // Case 2: PDFs are present. Start two-phase process.
-    // Phase 1: Extraction
+    // Case 2: PDFs are present. Start extraction phase.
     setAnalysisPhase('extracting');
     setExtractionProgress({ completed: 0, total: pdfsToProcess.length });
 
-    const extractionPromises = pdfsToProcess.map(pdf =>
-      supabase.functions.invoke('claude-proxy', {
-        body: { content: pdf.content, mode: 'extract' },
-      }).then(response => {
-        setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
-        return { ...response, pdfName: pdf.name };
-      })
-    );
-
-    const extractionResults = await Promise.allSettled(extractionPromises);
     const successfulExtractions: { name: string; summary: string }[] = [];
     let extractionErrors = 0;
 
-    extractionResults.forEach(result => {
-      if (result.status === 'fulfilled') {
-        const { data, error, pdfName } = result.value;
-        if (error || (data && data.error)) {
-          extractionErrors++;
-          console.error(`Extraction failed for ${pdfName}:`, error || (data && data.error));
-        } else {
-          successfulExtractions.push({ name: pdfName, summary: data.summary });
-        }
-      } else {
-        extractionErrors++;
-        console.error(`Extraction promise rejected for one of the PDFs:`, result.reason);
-      }
-    });
+    for (const pdf of pdfsToProcess) {
+      try {
+        const { data, error } = await supabase.functions.invoke('claude-proxy', {
+          body: { content: pdf.content, mode: 'extract' },
+        });
 
-    setExtractions(successfulExtractions);
+        if (error || (data && data.error)) {
+          throw new Error(error?.message || data?.error || 'Unknown extraction error');
+        }
+
+        successfulExtractions.push({ name: pdf.name, summary: data.summary });
+        // Update the UI immediately after a successful extraction
+        setExtractions([...successfulExtractions]);
+
+      } catch (e: any) {
+        extractionErrors++;
+        console.error(`Extraction failed for ${pdf.name}:`, e);
+      } finally {
+        // Update progress after each attempt
+        setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
+      }
+    }
 
     if (extractionErrors > 0) {
       showError(`Failed to extract ${extractionErrors} PDF(s). Check the console for details.`);
@@ -188,26 +183,7 @@ const Index = () => {
 
     /*
     // Phase 2: Synthesis (Temporarily Disabled)
-    setAnalysisPhase('synthesizing');
-    const combinedExtractions = successfulExtractions
-      .map(e => `--- Analysis of: ${e.name} ---\n\n${e.summary}`)
-      .join('\n\n---\n\n');
-    
-    const synthesisContent = [textContent, combinedExtractions].filter(Boolean).join('\n\n');
-
-    try {
-      const { data, error } = await supabase.functions.invoke('claude-proxy', {
-        body: { content: synthesisContent, mode: 'synthesize' },
-      });
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-      setSynthesisResult(data.summary);
-    } catch (error: any) {
-      showError(`Synthesis failed: ${error.message}`);
-      setAnalysisPhase('error');
-    } finally {
-      setAnalysisPhase('complete');
-    }
+    // ...
     */
   };
 
