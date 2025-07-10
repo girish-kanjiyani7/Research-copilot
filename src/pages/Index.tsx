@@ -156,29 +156,22 @@ const Index = () => {
         }
 
         successfulExtractions.push({ name: pdf.name, summary: data.summary });
-        // Update the UI immediately after a successful extraction
         setExtractions([...successfulExtractions]);
 
       } catch (e: any) {
         extractionErrors++;
         console.error(`Extraction failed for ${pdf.name}:`, e);
       } finally {
-        // Update progress after each attempt
         setExtractionProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
       }
     }
 
     if (extractionErrors > 0) {
-      showError(`Failed to extract ${extractionErrors} PDF(s). Check the console for details.`);
-    }
-    
-    if (successfulExtractions.length === 0 && pdfsToProcess.length > 0) {
-      showError("No PDF extractions were successful. Cannot proceed.");
+      showError(`Extraction failed for ${extractionErrors} PDF(s). Halting process for debugging. Please check the console for details.`);
       setAnalysisPhase('error');
       return;
     }
-
-    // The process will now stop here. The synthesis phase below is temporarily disabled for debugging.
+    
     setAnalysisPhase('complete');
 
     /*
