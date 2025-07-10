@@ -184,8 +184,9 @@ const Index = () => {
       }
 
       if (index < pdfsToProcess.length - 1) {
-        console.log('Waiting 1.5s before next request to avoid rate limiting...');
+        console.log(`[DELAY] Starting 1.5s delay before processing next PDF...`);
         await delay(1500);
+        console.log(`[DELAY] Delay finished. Proceeding.`);
       }
     }
 
