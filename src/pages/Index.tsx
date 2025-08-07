@@ -31,13 +31,16 @@ const Index = () => {
   const [parsedPdfs, setParsedPdfs] = useState<ParsedPdf[]>([]);
   const [tone, setTone] = useState("academic");
   const [writingSample, setWritingSample] = useState("");
+  const [writingSampleFileName, setWritingSampleFileName] = useState<string | null>(null);
   
   const [extractions, setExtractions] = useState<{ name: string; summary: string }[]>([]);
   const [synthesisResult, setSynthesisResult] = useState<string | null>(null);
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('idle');
 
   const [isParsing, setIsParsing] = useState(false);
+  const [isParsingWritingSample, setIsParsingWritingSample] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const writingSampleFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
@@ -110,6 +113,52 @@ const Index = () => {
     setParsedPdfs(prev => prev.filter(pdf => pdf.name !== name));
   };
 
+  const handleWritingSampleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+  
+    if (file.type !== "application/pdf") {
+      showError("Writing sample must be a PDF file.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      showError(`File "${file.name}" is too large.`);
+      return;
+    }
+  
+    setIsParsingWritingSample(true);
+    setWritingSampleFileName(file.name);
+    setWritingSample("");
+  
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => (item as any).str).join(' ');
+        fullText += pageText + "\n\n";
+      }
+      setWritingSample(fullText.trim());
+      showSuccess(`Successfully parsed writing sample: ${file.name}`);
+    } catch (error) {
+      console.error("Failed to parse writing sample PDF:", error);
+      showError(`Could not read text from "${file.name}".`);
+      setWritingSampleFileName(null);
+    } finally {
+      setIsParsingWritingSample(false);
+      if (writingSampleFileInputRef.current) {
+        writingSampleFileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const removeWritingSamplePdf = () => {
+    setWritingSample("");
+    setWritingSampleFileName(null);
+  };
+
   const handleGenerate = async () => {
     setExtractions([]);
     setSynthesisResult(null);
@@ -128,7 +177,6 @@ const Index = () => {
     try {
       const effectiveTone = tone === 'personalized' ? 'custom' : tone;
       
-      // Case 1: Only text content, no PDFs. Use simple summarization.
       if (textContent && pdfsToProcess.length === 0) {
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
           body: { 
@@ -144,7 +192,6 @@ const Index = () => {
         showSuccess("Summary generated!");
         setAnalysisPhase('complete');
       } 
-      // Case 2: PDFs are present (with or without text content). Use batch extraction and synthesis.
       else {
         const allSources = [...pdfsToProcess];
         if (textContent) {
@@ -180,7 +227,7 @@ const Index = () => {
     return 'Generate Summary';
   };
   
-  const isLoading = analysisPhase === 'processing' || isParsing;
+  const isLoading = analysisPhase === 'processing' || isParsing || isParsingWritingSample;
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -283,17 +330,51 @@ const Index = () => {
               {tone === 'personalized' && (
                 <div className="space-y-2 pt-2">
                   <Label htmlFor="writing-sample">Your Writing Style</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Paste a sample of your writing below, or upload a PDF of your work.
+                  </p>
                   <Textarea
                     id="writing-sample"
-                    placeholder="Paste a sample of your writing here (e.g., an email, a report, a blog post). The AI will learn your style and apply it to the summary."
+                    placeholder="Paste a sample of your writing here..."
                     className="min-h-[150px]"
                     value={writingSample}
-                    onChange={(e) => setWritingSample(e.target.value)}
+                    onChange={(e) => {
+                      setWritingSample(e.target.value);
+                      if (writingSampleFileName) {
+                        setWritingSampleFileName(null);
+                      }
+                    }}
                     disabled={isLoading}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Provide at least a few paragraphs for best results.
-                  </p>
+                  <input
+                    type="file"
+                    ref={writingSampleFileInputRef}
+                    onChange={handleWritingSampleFileChange}
+                    accept="application/pdf"
+                    className="hidden"
+                  />
+                  {writingSampleFileName ? (
+                    <div className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded-md">
+                      <span className="truncate max-w-xs font-medium">{writingSampleFileName}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={removeWritingSamplePdf} disabled={isLoading}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => writingSampleFileInputRef.current?.click()} 
+                      disabled={isLoading}
+                    >
+                      {isParsingWritingSample ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FileUp className="mr-2 h-4 w-4" />
+                      )}
+                      Upload Writing Sample (PDF)
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
