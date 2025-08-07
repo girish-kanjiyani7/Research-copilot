@@ -16,7 +16,6 @@ const corsHeaders = {
 };
 
 const MAX_CONTENT_LENGTH = 150000;
-const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper, with page breaks clearly marked as "--- Page X ---".
 
@@ -180,8 +179,9 @@ serve(async (req) => {
 
     // Mode 2: Full PDF extraction and synthesis
     if (mode === 'extract_and_synthesize' && pdfs && pdfs.length > 0) {
-      const extractions = [];
-      for (const [index, pdf] of pdfs.entries()) {
+      console.log(`[SERVER] Starting parallel extraction for ${pdfs.length} PDF(s).`);
+      
+      const extractionPromises = pdfs.map((pdf: any) => {
         const contentWithPages = pdf.pages
           .map((p: { page: number; content: string }) => `--- Page ${p.page} ---\n${p.content}`)
           .join('\n\n');
@@ -193,18 +193,27 @@ serve(async (req) => {
         }
         
         const extractionPrompt = `${PDF_ANALYSIS_PROMPT}\n\nHere is the text to analyze:\n\n${contentToProcess}`;
-        console.log(`[SERVER] Starting extraction for: ${pdf.name}`);
-        const summary = await callClaude(extractionPrompt, claudeApiKey);
-        extractions.push({ name: pdf.name, summary });
-        console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
+        
+        return callClaude(extractionPrompt, claudeApiKey)
+            .then(summary => {
+                console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
+                return { name: pdf.name, summary };
+            })
+            .catch(error => {
+                console.error(`[SERVER] Failed to extract: ${pdf.name}`, error);
+                return { name: pdf.name, summary: `Error processing this document: ${error.message}` };
+            });
+      });
 
-        if (index < pdfs.length - 1) {
-          console.log(`[SERVER] Waiting 2.5s before next request...`);
-          await delay(2500);
-        }
+      const extractions = await Promise.all(extractionPromises);
+      
+      const successfulExtractions = extractions.filter(e => !e.summary.startsWith('Error processing'));
+
+      if (successfulExtractions.length === 0) {
+        throw new Error("All PDF extractions failed.");
       }
 
-      const combinedExtractions = extractions
+      const combinedExtractions = successfulExtractions
         .map(ext => `--- Paper: ${ext.name} ---\n\n${ext.summary}`)
         .join('\n\n');
       
