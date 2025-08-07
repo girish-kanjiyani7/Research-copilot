@@ -235,13 +235,14 @@ serve(async (req) => {
       
       console.log("[SERVER] Starting synthesis...");
       
-      let synthesisPromptForClaude = SYNTHESIS_PROMPT;
+      let toneInstruction = "";
       if (writingSample) {
-        const styleInstruction = `Your final output must be written in the style of the sample text provided below. All other instructions in the prompt remain the same, including the mandatory citation format.\n\n--- WRITING STYLE SAMPLE ---\n${writingSample}\n--- END SAMPLE ---\n\n`;
-        synthesisPromptForClaude = styleInstruction + SYNTHESIS_PROMPT;
+        toneInstruction = `Your final output must be written in the style of the sample text provided below. All other instructions in the prompt remain the same, including the mandatory citation format.\n\n--- WRITING STYLE SAMPLE ---\n${writingSample}\n--- END SAMPLE ---\n\n`;
+      } else if (tone === 'layman') {
+        toneInstruction = `IMPORTANT: Write the final synthesis in a very human and accessible way. Imagine you're explaining it to a curious friend who is smart but not an expert in the field. Use simple terms, analogies, and focus on the 'so what?'. However, you MUST still include the mandatory citations for every point (e.g., [filename.pdf, p. 5]).\n\n`;
       }
-      
-      const finalSynthesisPrompt = `${synthesisPromptForClaude}\n\n${combinedExtractions}`;
+
+      const finalSynthesisPrompt = `${toneInstruction}${SYNTHESIS_PROMPT}\n\n${combinedExtractions}`;
       const synthesisResult = await callClaude(finalSynthesisPrompt, claudeApiKey);
       console.log("[SERVER] Synthesis complete.");
 
