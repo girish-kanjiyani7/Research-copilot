@@ -16,7 +16,7 @@ const corsHeaders = {
 };
 
 const MAX_CONTENT_LENGTH = 150000;
-const INTER_REQUEST_DELAY_MS = 1200; // ~1 second delay between requests
+const INTER_REQUEST_DELAY_MS = 15000; // 15-second delay between requests to respect token limits
 
 const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper, with page breaks clearly marked as "--- Page X ---".
 
@@ -132,7 +132,7 @@ Use this exact structure for your output, ensuring every point is cited with its
 async function callClaude(finalPrompt: string, claudeApiKey: string) {
   const claudeApiUrl = "https://api.anthropic.com/v1/messages";
   const maxRetries = 3;
-  let delay = 1000; // Start with a 1-second delay
+  let delay = 10000; // Start with a 10-second delay for retries
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const apiResponse = await fetch(claudeApiUrl, {
