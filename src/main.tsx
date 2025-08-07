@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
+import { SessionProvider } from "./contexts/SessionProvider.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <ThemeProvider
@@ -9,6 +10,8 @@ createRoot(document.getElementById("root")!).render(
     defaultTheme="dark"
     storageKey="vite-ui-theme"
   >
-    <App />
+    <SessionProvider>
+      <App />
+    </SessionProvider>
   </ThemeProvider>
 );
