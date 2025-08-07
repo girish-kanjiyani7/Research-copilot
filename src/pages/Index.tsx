@@ -126,12 +126,13 @@ const Index = () => {
     }
 
     try {
+      const effectiveTone = tone === 'personalized' ? 'custom' : tone;
       // Case 1: Only text content, no PDFs. Use simple summarization.
       if (textContent && pdfsToProcess.length === 0) {
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
           body: { 
             content: textContent, 
-            tone: tone, 
+            tone: effectiveTone, 
             mode: 'summarize_text',
             writingSample: writingSampleContent
           },
@@ -173,7 +174,6 @@ const Index = () => {
   };
   
   const isLoading = analysisPhase === 'processing' || isParsing;
-  const isToneDisabled = isLoading || !!writingSample.trim();
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -246,16 +246,35 @@ const Index = () => {
             )}
           </div>
 
-          <Accordion type="single" collapsible className="w-full">
-            <AccordionItem value="item-1">
-              <AccordionTrigger>
-                <span className="flex items-center font-semibold">
-                  <Sparkles className="mr-2 h-4 w-4 text-yellow-400" />
-                  Personalize Tone (Optional)
-                </span>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2 p-1">
+          <div className="flex flex-col md:flex-row items-start justify-between gap-6">
+            <div className="space-y-4 w-full">
+              <div className="space-y-2">
+                <Label>Select Tone</Label>
+                <RadioGroup defaultValue="academic" className="flex flex-wrap items-center gap-4" value={tone} onValueChange={setTone} disabled={isLoading}>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="academic" id="r1" />
+                    <Label htmlFor="r1">Academic</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="linkedin" id="r2" />
+                    <Label htmlFor="r2">LinkedIn Casual</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="layman" id="r3" />
+                    <Label htmlFor="r3">Layman</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="personalized" id="r4" />
+                    <Label htmlFor="r4" className="flex items-center">
+                      <Sparkles className="mr-2 h-4 w-4 text-yellow-400" />
+                      Personalized
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {tone === 'personalized' && (
+                <div className="space-y-2 pt-2">
                   <Label htmlFor="writing-sample">Your Writing Style</Label>
                   <Textarea
                     id="writing-sample"
@@ -266,38 +285,17 @@ const Index = () => {
                     disabled={isLoading}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Provide at least a few paragraphs for best results. This will override the tone selection below.
+                    Provide at least a few paragraphs for best results.
                   </p>
                 </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-            <div className="space-y-2">
-              <Label className={isToneDisabled ? 'text-muted-foreground' : ''}>Select Tone</Label>
-              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={isToneDisabled}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="academic" id="r1" />
-                  <Label htmlFor="r1" className={isToneDisabled ? 'text-muted-foreground' : ''}>Academic</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="linkedin" id="r2" />
-                  <Label htmlFor="r2" className={isToneDisabled ? 'text-muted-foreground' : ''}>LinkedIn Casual</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="layman" id="r3" />
-                  <Label htmlFor="r3" className={isToneDisabled ? 'text-muted-foreground' : ''}>Layman</Label>
-                </div>
-              </RadioGroup>
-              {isToneDisabled && !!writingSample.trim() && (
-                <p className="text-xs text-muted-foreground">Disabled because a writing sample is provided.</p>
               )}
             </div>
-            <Button onClick={handleGenerate} disabled={isLoading || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {getButtonText()}
-            </Button>
+            <div className="pt-5">
+              <Button onClick={handleGenerate} disabled={isLoading || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8 w-full md:w-auto">
+                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {getButtonText()}
+              </Button>
+            </div>
           </div>
         </div>
 
