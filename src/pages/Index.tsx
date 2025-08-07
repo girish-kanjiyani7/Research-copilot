@@ -310,10 +310,6 @@ const Index = () => {
                     <Label htmlFor="r1">Academic</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="linkedin" id="r2" />
-                    <Label htmlFor="r2">LinkedIn Casual</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
                     <RadioGroupItem value="layman" id="r3" />
                     <Label htmlFor="r3">Layman</Label>
                   </div>

@@ -173,7 +173,15 @@ serve(async (req) => {
       if (writingSample) {
         finalPrompt += `\n\nYour response must adopt the writing style, tone, and voice of the following sample text:\n\n--- WRITING STYLE SAMPLE ---\n${writingSample}\n--- END SAMPLE ---`;
       } else {
-        finalPrompt += `\n\nWrite the summary in a ${tone} tone.`;
+        switch (tone) {
+          case 'layman':
+            finalPrompt += `\n\nExplain the summary in a very human and accessible way. Imagine you're explaining it to a curious friend who is smart but not an expert in the field. Use simple terms, analogies, and focus on the 'so what?' — the key takeaways and real-world implications. Avoid jargon completely. The tone should be engaging, clear, and easy to understand.`;
+            break;
+          case 'academic':
+          default:
+            finalPrompt += `\n\nWrite the summary in a formal, academic tone suitable for a research paper or scientific context.`;
+            break;
+        }
       }
       finalPrompt += `\n\nHere is the text to analyze:\n\n${content}`;
       

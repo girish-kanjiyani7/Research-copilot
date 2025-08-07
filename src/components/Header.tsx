@@ -3,11 +3,19 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useSession } from "@/contexts/SessionProvider";
 import { Button } from "./ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export const Header = () => {
   const { session, loading } = useSession();
   const navigate = useNavigate();
+
+  const handleLogoClick = () => {
+    if (session) {
+      navigate('/');
+    } else {
+      navigate('/about');
+    }
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -17,14 +25,15 @@ export const Header = () => {
   return (
     <header className="py-4 px-6 border-b">
       <div className="container mx-auto flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div 
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={handleLogoClick}
+        >
           <FlaskConical className="h-6 w-6 text-primary" />
           <h1 className="text-xl font-bold">ResearchCopilot</h1>
         </div>
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
-          <a href="#" className="text-muted-foreground hover:text-foreground">About</a>
-          <a href="#" className="text-muted-foreground hover:text-foreground">Privacy</a>
-          <a href="#" className="text-muted-foreground hover:text-foreground">GitHub</a>
+          <Link to="/about" className="text-muted-foreground hover:text-foreground">About</Link>
         </nav>
         <div className="flex items-center gap-4">
           <ThemeToggle />
