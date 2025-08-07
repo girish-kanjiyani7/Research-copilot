@@ -8,7 +8,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { FileUp, X, Loader2 } from "lucide-react";
+import { FileUp, X, Loader2, Sparkles } from "lucide-react";
 import { showError, showSuccess } from "@/utils/toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from 'pdfjs-dist';
@@ -30,6 +30,7 @@ const Index = () => {
   const [content, setContent] = useState("");
   const [parsedPdfs, setParsedPdfs] = useState<ParsedPdf[]>([]);
   const [tone, setTone] = useState("academic");
+  const [writingSample, setWritingSample] = useState("");
   
   const [extractions, setExtractions] = useState<{ name: string; summary: string }[]>([]);
   const [synthesisResult, setSynthesisResult] = useState<string | null>(null);
@@ -116,6 +117,7 @@ const Index = () => {
 
     const textContent = content.trim();
     const pdfsToProcess = parsedPdfs;
+    const writingSampleContent = writingSample.trim();
 
     if (!textContent && pdfsToProcess.length === 0) {
       showError("There is no content to analyze.");
@@ -127,7 +129,12 @@ const Index = () => {
       // Case 1: Only text content, no PDFs. Use simple summarization.
       if (textContent && pdfsToProcess.length === 0) {
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
-          body: { content: textContent, tone: tone, mode: 'summarize_text' },
+          body: { 
+            content: textContent, 
+            tone: tone, 
+            mode: 'summarize_text',
+            writingSample: writingSampleContent
+          },
         });
         if (error) throw error;
         if (data.error) throw new Error(data.error);
@@ -137,7 +144,11 @@ const Index = () => {
       // Case 2: PDFs are present. Use batch extraction and synthesis.
       else if (pdfsToProcess.length > 0) {
         const { data, error } = await supabase.functions.invoke('claude-proxy', {
-          body: { pdfs: pdfsToProcess, mode: 'extract_and_synthesize' },
+          body: { 
+            pdfs: pdfsToProcess, 
+            mode: 'extract_and_synthesize',
+            writingSample: writingSampleContent
+          },
         });
         if (error) throw error;
         if (data.error) throw new Error(data.error);
@@ -162,6 +173,7 @@ const Index = () => {
   };
   
   const isLoading = analysisPhase === 'processing' || isParsing;
+  const isToneDisabled = isLoading || !!writingSample.trim();
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -234,23 +246,53 @@ const Index = () => {
             )}
           </div>
 
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="item-1">
+              <AccordionTrigger>
+                <span className="flex items-center font-semibold">
+                  <Sparkles className="mr-2 h-4 w-4 text-yellow-400" />
+                  Personalize Tone (Optional)
+                </span>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2 p-1">
+                  <Label htmlFor="writing-sample">Your Writing Style</Label>
+                  <Textarea
+                    id="writing-sample"
+                    placeholder="Paste a sample of your writing here (e.g., an email, a report, a blog post). The AI will learn your style and apply it to the summary."
+                    className="min-h-[150px]"
+                    value={writingSample}
+                    onChange={(e) => setWritingSample(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Provide at least a few paragraphs for best results. This will override the tone selection below.
+                  </p>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-2">
-              <Label>Select Tone</Label>
-              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={parsedPdfs.length > 0 || isLoading}>
+              <Label className={isToneDisabled ? 'text-muted-foreground' : ''}>Select Tone</Label>
+              <RadioGroup defaultValue="academic" className="flex items-center gap-4" value={tone} onValueChange={setTone} disabled={isToneDisabled}>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="academic" id="r1" />
-                  <Label htmlFor="r1">Academic</Label>
+                  <Label htmlFor="r1" className={isToneDisabled ? 'text-muted-foreground' : ''}>Academic</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="linkedin" id="r2" />
-                  <Label htmlFor="r2">LinkedIn Casual</Label>
+                  <Label htmlFor="r2" className={isToneDisabled ? 'text-muted-foreground' : ''}>LinkedIn Casual</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="layman" id="r3" />
-                  <Label htmlFor="r3">Layman</Label>
+                  <Label htmlFor="r3" className={isToneDisabled ? 'text-muted-foreground' : ''}>Layman</Label>
                 </div>
               </RadioGroup>
+              {isToneDisabled && !!writingSample.trim() && (
+                <p className="text-xs text-muted-foreground">Disabled because a writing sample is provided.</p>
+              )}
             </div>
             <Button onClick={handleGenerate} disabled={isLoading || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8">
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

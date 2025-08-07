@@ -161,7 +161,7 @@ serve(async (req) => {
   }
 
   try {
-    const { content, pdfs, mode, tone } = await req.json();
+    const { content, pdfs, mode, tone, writingSample } = await req.json();
     const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
     if (!claudeApiKey) {
       throw new Error("Server configuration error: CLAUDE_API_KEY secret is not set.");
@@ -169,7 +169,14 @@ serve(async (req) => {
 
     // Mode 1: Simple text summarization
     if (mode === 'summarize_text') {
-      const finalPrompt = `You are a research assistant. Summarize the following text in a ${tone} tone.\n\nHere is the text to analyze:\n\n${content}`;
+      let finalPrompt = `You are a research assistant. Summarize the following text.`;
+      if (writingSample) {
+        finalPrompt += `\n\nYour response must adopt the writing style, tone, and voice of the following sample text:\n\n--- WRITING STYLE SAMPLE ---\n${writingSample}\n--- END SAMPLE ---`;
+      } else {
+        finalPrompt += `\n\nWrite the summary in a ${tone} tone.`;
+      }
+      finalPrompt += `\n\nHere is the text to analyze:\n\n${content}`;
+      
       const summary = await callClaude(finalPrompt, claudeApiKey);
       return new Response(JSON.stringify({ summary }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -219,8 +226,15 @@ serve(async (req) => {
         .join('\n\n');
       
       console.log("[SERVER] Starting synthesis...");
-      const synthesisPrompt = `${SYNTHESIS_PROMPT}\n\n${combinedExtractions}`;
-      const synthesisResult = await callClaude(synthesisPrompt, claudeApiKey);
+      
+      let synthesisPromptForClaude = SYNTHESIS_PROMPT;
+      if (writingSample) {
+        const styleInstruction = `Your final output must be written in the style of the sample text provided below. All other instructions in the prompt remain the same, including the mandatory citation format.\n\n--- WRITING STYLE SAMPLE ---\n${writingSample}\n--- END SAMPLE ---\n\n`;
+        synthesisPromptForClaude = styleInstruction + SYNTHESIS_PROMPT;
+      }
+      
+      const finalSynthesisPrompt = `${synthesisPromptForClaude}\n\n${combinedExtractions}`;
+      const synthesisResult = await callClaude(finalSynthesisPrompt, claudeApiKey);
       console.log("[SERVER] Synthesis complete.");
 
       return new Response(JSON.stringify({ extractions, synthesisResult }), {
