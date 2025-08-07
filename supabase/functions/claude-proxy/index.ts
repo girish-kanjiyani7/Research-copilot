@@ -214,6 +214,12 @@ serve(async (req) => {
 
         const batchResults = await Promise.all(extractionPromises);
         extractions = extractions.concat(batchResults);
+
+        const isLastBatch = (i + BATCH_SIZE) >= pdfs.length;
+        if (!isLastBatch) {
+            console.log(`[SERVER] Batch complete. Waiting for 2 seconds before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // 2-second delay
+        }
       }
       
       const successfulExtractions = extractions.filter(e => !e.summary.startsWith('Error processing'));
