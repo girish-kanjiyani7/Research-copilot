@@ -11,9 +11,9 @@ export const Header = () => {
 
   const handleLogoClick = () => {
     if (session) {
-      navigate('/');
+      navigate('/analysis');
     } else {
-      navigate('/about');
+      navigate('/');
     }
   };
 

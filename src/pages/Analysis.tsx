@@ -26,7 +26,7 @@ type ParsedPdf = {
   pages: { page: number; content: string }[];
 };
 
-const Index = () => {
+const Analysis = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
   const [content, setContent] = useState("");
@@ -466,4 +466,4 @@ const Index = () => {
   );
 };
 
-export default Index;
+export default Analysis;
