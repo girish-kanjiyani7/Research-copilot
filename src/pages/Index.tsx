@@ -28,15 +28,12 @@ const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
   const [content, setContent] = useState("");
-  const [blogContent, setBlogContent] = useState("");
-  const [emailContent, setEmailContent] = useState("");
   const [parsedPdfs, setParsedPdfs] = useState<ParsedPdf[]>([]);
   const [tone, setTone] = useState("academic");
   const [writingSample, setWritingSample] = useState("");
   
   const [extractions, setExtractions] = useState<{ name: string; summary: string }[]>([]);
   const [synthesisResult, setSynthesisResult] = useState<string | null>(null);
-  const [resultTitle, setResultTitle] = useState("Summary");
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('idle');
 
   const [isParsing, setIsParsing] = useState(false);
@@ -118,48 +115,57 @@ const Index = () => {
     setSynthesisResult(null);
     setAnalysisPhase('processing');
 
-    const combinedText = [
-      content.trim() ? `## General Text\n${content.trim()}` : '',
-      blogContent.trim() ? `## Blog Post\n${blogContent.trim()}` : '',
-      emailContent.trim() ? `## Email\n${emailContent.trim()}` : ''
-    ].filter(Boolean).join('\n\n---\n\n');
+    const textContent = content.trim();
+    const pdfsToProcess = parsedPdfs;
+    const writingSampleContent = writingSample.trim();
 
-    let allSources = [...parsedPdfs];
-    if (combinedText) {
-      allSources.push({
-        name: 'Pasted Content',
-        pages: [{ page: 1, content: combinedText }]
-      });
-    }
-
-    if (allSources.length === 0) {
+    if (!textContent && pdfsToProcess.length === 0) {
       showError("There is no content to analyze.");
       setAnalysisPhase('idle');
       return;
     }
 
-    if (allSources.length > 1 || (allSources.length === 1 && allSources[0].name !== 'Pasted Content')) {
-      setResultTitle("Synthesized Analysis");
-    } else {
-      setResultTitle("Summary");
-    }
-
     try {
-      const writingSampleContent = writingSample.trim();
-      const { data, error } = await supabase.functions.invoke('claude-proxy', {
-        body: { 
-          pdfs: allSources, 
-          mode: 'extract_and_synthesize',
-          writingSample: writingSampleContent
-        },
-      });
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
+      const effectiveTone = tone === 'personalized' ? 'custom' : tone;
       
-      setExtractions(data.extractions || []);
-      setSynthesisResult(data.synthesisResult || null);
-      showSuccess("Analysis complete!");
-      setAnalysisPhase('complete');
+      // Case 1: Only text content, no PDFs. Use simple summarization.
+      if (textContent && pdfsToProcess.length === 0) {
+        const { data, error } = await supabase.functions.invoke('claude-proxy', {
+          body: { 
+            content: textContent, 
+            tone: effectiveTone, 
+            mode: 'summarize_text',
+            writingSample: writingSampleContent
+          },
+        });
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+        setSynthesisResult(data.summary);
+        showSuccess("Summary generated!");
+        setAnalysisPhase('complete');
+      } 
+      // Case 2: PDFs are present (with or without text content). Use batch extraction and synthesis.
+      else {
+        const allSources = [...pdfsToProcess];
+        if (textContent) {
+          allSources.unshift({ name: "Pasted Content", pages: [{ page: 1, content: textContent }] });
+        }
+
+        const { data, error } = await supabase.functions.invoke('claude-proxy', {
+          body: { 
+            pdfs: allSources, 
+            mode: 'extract_and_synthesize',
+            writingSample: writingSampleContent
+          },
+        });
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+        
+        setExtractions(data.extractions || []);
+        setSynthesisResult(data.synthesisResult || null);
+        showSuccess("Analysis complete!");
+        setAnalysisPhase('complete');
+      }
     } catch (error: any) {
       console.error("An error occurred during analysis:", error);
       showError(`Analysis failed: ${error.message}`);
@@ -175,7 +181,6 @@ const Index = () => {
   };
   
   const isLoading = analysisPhase === 'processing' || isParsing;
-  const canGenerate = !isLoading && (!!content || !!blogContent || !!emailContent || parsedPdfs.length > 0);
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -203,71 +208,34 @@ const Index = () => {
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Paste Content (Optional)</Label>
-              <Accordion type="multiple" className="w-full border rounded-md">
-                <AccordionItem value="item-1" className="border-b">
-                  <AccordionTrigger className="px-4 font-medium hover:no-underline">General Text / Abstracts</AccordionTrigger>
-                  <AccordionContent className="px-4 pb-4">
-                    <Textarea
-                      placeholder="Paste general text, notes, or abstracts here..."
-                      className="min-h-[150px]"
-                      value={content}
-                      onChange={(e) => setContent(e.target.value)}
-                      disabled={isLoading}
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="item-2" className="border-b">
-                  <AccordionTrigger className="px-4 font-medium hover:no-underline">Blog Post / Article</AccordionTrigger>
-                  <AccordionContent className="px-4 pb-4">
-                    <Textarea
-                      placeholder="Paste the full text of a blog post or article here..."
-                      className="min-h-[150px]"
-                      value={blogContent}
-                      onChange={(e) => setBlogContent(e.target.value)}
-                      disabled={isLoading}
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="item-3" className="border-b-0">
-                  <AccordionTrigger className="px-4 font-medium hover:no-underline">Email</AccordionTrigger>
-                  <AccordionContent className="px-4 pb-4">
-                    <Textarea
-                      placeholder="Paste the text of an email here..."
-                      className="min-h-[150px]"
-                      value={emailContent}
-                      onChange={(e) => setEmailContent(e.target.value)}
-                      disabled={isLoading}
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+          <div className="space-y-2">
+            <Label htmlFor="abstracts">Paste content and/or upload PDFs</Label>
+            <Textarea
+              id="abstracts"
+              placeholder="Paste text, notes, or abstracts here..."
+              className="min-h-[200px] rounded-md"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              disabled={isLoading}
+            />
+             <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="application/pdf"
+              className="hidden"
+              multiple
+            />
+            <div className="pt-2">
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isLoading || parsedPdfs.length >= MAX_FILES}>
+                  {isParsing ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                      <FileUp className="mr-2 h-4 w-4" />
+                  )}
+                  Attach PDF ({parsedPdfs.length}/{MAX_FILES})
+              </Button>
             </div>
-
-            <div className="space-y-2">
-              <Label>Upload PDFs (Optional)</Label>
-              <div>
-                <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isLoading || parsedPdfs.length >= MAX_FILES}>
-                    {isParsing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                        <FileUp className="mr-2 h-4 w-4" />
-                    )}
-                    Attach PDF ({parsedPdfs.length}/{MAX_FILES})
-                </Button>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept="application/pdf"
-                  className="hidden"
-                  multiple
-                />
-              </div>
-            </div>
-
             {parsedPdfs.length > 0 && (
               <div className="space-y-2 pt-2">
                 <Label>Attached PDFs</Label>
@@ -330,7 +298,7 @@ const Index = () => {
               )}
             </div>
             <div className="pt-5">
-              <Button onClick={handleGenerate} disabled={!canGenerate} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8 w-full md:w-auto">
+              <Button onClick={handleGenerate} disabled={isLoading || (!content && parsedPdfs.length === 0)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full px-8 w-full md:w-auto">
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {getButtonText()}
               </Button>
@@ -363,7 +331,9 @@ const Index = () => {
             {synthesisResult && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-2xl font-bold">{resultTitle}</CardTitle>
+                  <CardTitle className="text-2xl font-bold">
+                    {(parsedPdfs.length + (content.trim() ? 1 : 0)) > 1 ? "Synthesized Analysis" : "Summary"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{synthesisResult}</div>
