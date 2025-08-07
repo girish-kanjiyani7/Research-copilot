@@ -19,12 +19,16 @@ const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 type AnalysisPhase = 'idle' | 'processing' | 'complete' | 'error';
+type ParsedPdf = {
+  name: string;
+  pages: { page: number; content: string }[];
+};
 
 const Index = () => {
   const [topic, setTopic] = useState("Stem Cell Derived Islets");
   const [dateRange, setDateRange] = useState("2014-2024");
   const [content, setContent] = useState("");
-  const [parsedPdfs, setParsedPdfs] = useState<{ name: string; content: string }[]>([]);
+  const [parsedPdfs, setParsedPdfs] = useState<ParsedPdf[]>([]);
   const [tone, setTone] = useState("academic");
   
   const [extractions, setExtractions] = useState<{ name: string; summary: string }[]>([]);
@@ -51,7 +55,7 @@ const Index = () => {
 
     setIsParsing(true);
     
-    const newlyParsedPdfs: { name: string; content: string }[] = [];
+    const newlyParsedPdfs: ParsedPdf[] = [];
     let hadError = false;
 
     for (const file of newFiles) {
@@ -74,14 +78,14 @@ const Index = () => {
       try {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-        let fullText = '';
+        const pages: { page: number; content: string }[] = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           const pageText = textContent.items.map(item => (item as any).str).join(' ');
-          fullText += pageText + '\n';
+          pages.push({ page: i, content: pageText });
         }
-        newlyParsedPdfs.push({ name: file.name, content: fullText });
+        newlyParsedPdfs.push({ name: file.name, pages });
       } catch (error) {
         console.error(`Failed to parse PDF "${file.name}":`, error);
         showError(`Could not read text from "${file.name}".`);

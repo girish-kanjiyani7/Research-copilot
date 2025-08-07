@@ -1,14 +1,13 @@
 // These declarations are added to satisfy the TypeScript compiler in a non-Deno environment.
-declare module "https://deno.land/std@0.190.0/http/server.ts" {
-  export function serve(handler: (req: Request) => Response | Promise<Response>): void;
-}
-
 declare const Deno: {
   env: {
     get(key: string): string | undefined;
   };
 };
 
+// @ts-ignore: This directive is used to suppress TypeScript errors about Deno-specific URL imports,
+// which are not understood in a standard Node.js/Vite environment.
+// The code will execute correctly in the Deno runtime on Supabase Edge Functions.
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 
 const corsHeaders = {
@@ -19,107 +18,110 @@ const corsHeaders = {
 const MAX_CONTENT_LENGTH = 150000;
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper.
+const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper, with page breaks clearly marked as "--- Page X ---".
 
-Your task is to extract and organize all essential scientific information from the paper, **without missing any key details**, especially from the methods and results.
+Your task is to extract and organize all essential scientific information from the paper. **For every piece of information you extract, you MUST cite the page number it came from in parentheses, like this: (p. 5).**
 
 Follow this format strictly:
 
 ---
 
 **Title:**  
-[Extracted]
+[Extracted] (p. X)
 
 **Authors:**  
-[Extracted if available]
+[Extracted if available] (p. X)
 
 **Journal/DOI:**  
-[Extracted if available]
+[Extracted if available] (p. X)
 
 ---
 
 ### 1. Research Question  
-- What problem is being investigated?
+- What problem is being investigated? (p. X)
 
 ### 2. Background  
-- Prior context, motivation, previous gaps
+- Prior context, motivation, previous gaps. (p. X)
 
 ### 3. Methodology  
 Include:
-- Study type (e.g., RCT, observational, simulation)
-- Sample size and characteristics
-- Data collection tools, procedures
-- Controls, variables, models
+- Study type (e.g., RCT, observational, simulation). (p. X)
+- Sample size and characteristics. (p. X)
+- Data collection tools, procedures. (p. X)
+- Controls, variables, models. (p. X)
 
 ### 4. Key Findings  
-- All experimental results
-- Quantitative outcomes, effect sizes, statistical metrics (e.g. p-values)
-- Any differences across groups or conditions
+- All experimental results. (p. X)
+- Quantitative outcomes, effect sizes, statistical metrics (e.g. p-values). (p. X)
+- Any differences across groups or conditions. (p. X)
 
 ### 5. Conclusions  
-- What the authors claim based on their results
+- What the authors claim based on their results. (p. X)
 
 ### 6. Limitations  
-- Any constraints or cautions mentioned
+- Any constraints or cautions mentioned. (p. X)
 
 ### 7. Future Directions  
-- Any proposed next steps or open questions
+- Any proposed next steps or open questions. (p. X)
 
 ---
 
 **Instructions:**
-- Be exhaustive and precise
-- Do NOT skip anything, especially in methods or findings
-- If a section is not present, write “Not stated”
-- Use bullet points when listing multiple items`;
+- Be exhaustive and precise.
+- **Cite the page number for every single point.**
+- Do NOT skip anything, especially in methods or findings.
+- If a section is not present, write “Not stated.”
+- Use bullet points when listing multiple items.`;
 
-const SYNTHESIS_PROMPT = `You are a scientific writing assistant. You have been given structured research findings from multiple academic papers, each with a filename as a source identifier. Your task is to create a single, unified summary that synthesizes all important information, with **mandatory inline citations** for every point.
+const SYNTHESIS_PROMPT = `You are a scientific writing assistant. You have been given structured research findings from multiple academic papers. Each finding is already annotated with its page number, and each paper has a filename as a source identifier. Your task is to create a single, unified summary that synthesizes all important information, with **mandatory inline citations for every point, including the page number.**
 
 ---
 **CRITICAL CITATION REQUIREMENT:**
 
-For **every statement** you make, you **MUST** include an inline citation indicating the source paper(s) using the filename provided (e.g., [filename.pdf]). If a finding is supported by multiple papers, cite them all.
+For **every statement** you make, you **MUST** include an inline citation indicating the source paper and the exact page number, like this: **[filename.pdf, p. 5]**. If a finding is supported by multiple papers, cite them all.
 
 **Example Format:**
-- **Correct:** "The studies used mouse models [miller_et_al_2022.pdf] and rat models [chen_2021_review.pdf]."
-- **Correct:** "The treatment was found to be effective [miller_et_al_2022.pdf, chen_2021_review.pdf]."
-- **Incorrect:** "The studies used both mouse and rat models."
+- **Correct:** "The studies used mouse models [miller_et_al_2022.pdf, p. 3] and rat models [chen_2021_review.pdf, p. 8]."
+- **Correct:** "The treatment was found to be effective [miller_et_al_2022.pdf, p. 12; chen_2021_review.pdf, p. 15]."
+- **Incorrect:** "The studies used both mouse and rat models. [miller_et_al_2022.pdf]"
+- **Incorrect:** "The treatment was found to be effective."
 
-**Failure to provide citations for every piece of information will render the output useless. Be meticulous.**
+**Failure to provide citations with page numbers for every piece of information will render the output useless. Be meticulous.**
 ---
 
-Use this exact structure for your output, ensuring every point is cited:
+Use this exact structure for your output, ensuring every point is cited with its filename and page number:
 
 **1. Combined Research Question(s)**  
-- What core questions or hypotheses are being explored across the papers? [Cite sources]
+- What core questions or hypotheses are being explored across the papers? [Cite sources with page numbers]
 
 **2. Shared Background & Motivation**  
-- What is the overall context or significance of this research area? [Cite sources]
-- Mention any recurring gaps or goals across the literature. [Cite sources]
+- What is the overall context or significance of this research area? [Cite sources with page numbers]
+- Mention any recurring gaps or goals across the literature. [Cite sources with page numbers]
 
 **3. Methodologies (Across All Papers)**  
-- List all experimental or analytical methods used, including sample sizes, populations, models, and tools. [Cite sources]
-- Note methodological similarities and differences between papers. [Cite sources]
+- List all experimental or analytical methods used, including sample sizes, populations, models, and tools. [Cite sources with page numbers]
+- Note methodological similarities and differences between papers. [Cite sources with page numbers]
 
 **4. Key Findings (Synthesized)**  
-- Consolidate all key results, including quantitative metrics (e.g., effect sizes, p-values). [Cite sources]
-- Mention which findings appear across multiple papers and which are unique. [Cite sources]
+- Consolidate all key results, including quantitative metrics (e.g., effect sizes, p-values). [Cite sources with page numbers]
+- Mention which findings appear across multiple papers and which are unique. [Cite sources with page numbers]
 
 **5. Authors’ Conclusions (Across Studies)**  
-- What did the authors of these papers conclude individually or collectively? [Cite sources]
-- Clearly distinguish between well-supported claims and speculative statements. [Cite sources]
+- What did the authors of these papers conclude individually or collectively? [Cite sources with page numbers]
+- Clearly distinguish between well-supported claims and speculative statements. [Cite sources with page numbers]
 
 **6. Limitations**  
-- Summarize all limitations mentioned across the papers, grouping by type if possible. [Cite sources]
+- Summarize all limitations mentioned across the papers, grouping by type if possible. [Cite sources with page numbers]
 
 **7. Suggested Future Directions**  
-- What future research ideas or open questions appear across the studies? [Cite sources]
+- What future research ideas or open questions appear across the studies? [Cite sources with page numbers]
 
 ---
 
 **Instructions:**
 - You are synthesizing high-detail research with citations, not just summarizing.
-- Include minor but important data points, ensuring each is cited.
+- The input you receive already contains page numbers for each fact. Use them.
+- Include minor but important data points, ensuring each is cited with its page number.
 - Do NOT oversimplify or omit important nuance.
 - Maintain a clear, technical tone appropriate for scientific writing.
 
@@ -180,7 +182,11 @@ serve(async (req) => {
     if (mode === 'extract_and_synthesize' && pdfs && pdfs.length > 0) {
       const extractions = [];
       for (const [index, pdf] of pdfs.entries()) {
-        let contentToProcess = pdf.content;
+        const contentWithPages = pdf.pages
+          .map((p: { page: number; content: string }) => `--- Page ${p.page} ---\n${p.content}`)
+          .join('\n\n');
+
+        let contentToProcess = contentWithPages;
         if (contentToProcess.length > MAX_CONTENT_LENGTH) {
           console.warn(`Content from ${pdf.name} is too long and is being truncated.`);
           contentToProcess = contentToProcess.substring(0, MAX_CONTENT_LENGTH);
