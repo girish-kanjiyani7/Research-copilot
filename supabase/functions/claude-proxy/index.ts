@@ -16,6 +16,7 @@ const corsHeaders = {
 };
 
 const MAX_CONTENT_LENGTH = 150000;
+const INTER_REQUEST_DELAY_MS = 1200; // ~1 second delay between requests
 
 const PDF_ANALYSIS_PROMPT = `You are a scientific analysis assistant. You will receive the full text of a research paper, with page breaks clearly marked as "--- Page X ---".
 
@@ -154,21 +155,18 @@ async function callClaude(finalPrompt: string, claudeApiKey: string) {
       return claudeData.content[0].text;
     }
 
-    // If we get a rate limit error (429) and have retries left
     if (apiResponse.status === 429 && attempt < maxRetries) {
       console.warn(`Rate limit hit. Retrying in ${delay / 1000}s...`);
       await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2; // Double the delay for the next retry (exponential backoff)
-      continue; // Go to the next iteration of the loop
+      delay *= 2;
+      continue;
     }
 
-    // For any other error, or if we've run out of retries
     const errorBody = await apiResponse.text();
     console.error("Claude API Error:", errorBody);
     throw new Error(`External API Error: Claude API request failed with status ${apiResponse.status}.`);
   }
 
-  // This line should not be reached if the loop logic is correct, but it's a safeguard.
   throw new Error("Claude API request failed after all retries.");
 }
 
@@ -184,7 +182,6 @@ serve(async (req) => {
       throw new Error("Server configuration error: CLAUDE_API_KEY secret is not set.");
     }
 
-    // Mode 1: Simple text summarization
     if (mode === 'summarize_text') {
       let finalPrompt = `You are a research assistant. Summarize the following text.`;
       if (writingSample) {
@@ -209,13 +206,13 @@ serve(async (req) => {
       });
     }
 
-    // Mode 2: Full PDF extraction and synthesis
     if (mode === 'extract_and_synthesize' && pdfs && pdfs.length > 0) {
       console.log(`[SERVER] Starting sequential extraction for ${pdfs.length} PDF(s).`);
       
       let extractions = [];
 
-      for (const pdf of pdfs) {
+      for (let i = 0; i < pdfs.length; i++) {
+        const pdf = pdfs[i];
         console.log(`[SERVER] Processing: ${pdf.name}`);
         try {
           const contentWithPages = pdf.pages
@@ -237,6 +234,11 @@ serve(async (req) => {
         } catch (error) {
           console.error(`[SERVER] Failed to extract: ${pdf.name}`, error);
           extractions.push({ name: pdf.name, summary: `Error processing this document: ${error.message}` });
+        }
+
+        if (i < pdfs.length - 1) {
+          console.log(`[SERVER] Pausing for ${INTER_REQUEST_DELAY_MS / 1000}s before next request...`);
+          await new Promise(resolve => setTimeout(resolve, INTER_REQUEST_DELAY_MS));
         }
       }
       
