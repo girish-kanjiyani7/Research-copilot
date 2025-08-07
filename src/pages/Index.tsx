@@ -13,6 +13,8 @@ import { showError, showSuccess } from "@/utils/toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;
@@ -396,7 +398,9 @@ const Index = () => {
                       <AccordionItem value={`item-${index}`} key={extraction.name}>
                         <AccordionTrigger>{extraction.name}</AccordionTrigger>
                         <AccordionContent>
-                          <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{extraction.summary}</div>
+                          <div className="prose dark:prose-invert max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{extraction.summary}</ReactMarkdown>
+                          </div>
                         </AccordionContent>
                       </AccordionItem>
                     ))}
@@ -413,7 +417,9 @@ const Index = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{synthesisResult}</div>
+                  <div className="prose dark:prose-invert max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{synthesisResult}</ReactMarkdown>
+                  </div>
                 </CardContent>
               </Card>
             )}
