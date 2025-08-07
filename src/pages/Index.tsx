@@ -8,7 +8,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { FileUp, X, Loader2, Sparkles } from "lucide-react";
+import { FileUp, X, Loader2, Sparkles, Copy, Check } from "lucide-react";
 import { showError, showSuccess } from "@/utils/toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from 'pdfjs-dist';
@@ -41,6 +41,7 @@ const Index = () => {
 
   const [isParsing, setIsParsing] = useState(false);
   const [isParsingWritingSample, setIsParsingWritingSample] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const writingSampleFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -222,6 +223,20 @@ const Index = () => {
     }
   };
 
+  const handleCopy = () => {
+    if (!synthesisResult) return;
+    navigator.clipboard.writeText(synthesisResult).then(() => {
+      showSuccess("Copied to clipboard!");
+      setIsCopied(true);
+      setTimeout(() => {
+        setIsCopied(false);
+      }, 2000);
+    }).catch(err => {
+      console.error('Failed to copy text: ', err);
+      showError("Failed to copy text.");
+    });
+  };
+
   const getButtonText = () => {
     if (analysisPhase === 'processing') {
       return 'Processing...';
@@ -396,7 +411,24 @@ const Index = () => {
                   <Accordion type="single" collapsible className="w-full">
                     {extractions.map((extraction, index) => (
                       <AccordionItem value={`item-${index}`} key={extraction.name}>
-                        <AccordionTrigger>{extraction.name}</AccordionTrigger>
+                        <AccordionTrigger>
+                          <div className="flex items-center justify-between w-full pr-4">
+                            <span className="text-left">{extraction.name}</span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(extraction.summary);
+                                showSuccess(`Copied extraction from ${extraction.name}`);
+                              }}
+                              className="h-8 w-8 flex-shrink-0"
+                            >
+                              <Copy className="h-4 w-4" />
+                              <span className="sr-only">Copy extraction</span>
+                            </Button>
+                          </div>
+                        </AccordionTrigger>
                         <AccordionContent>
                           <div className="prose dark:prose-invert max-w-none">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{extraction.summary}</ReactMarkdown>
@@ -411,10 +443,14 @@ const Index = () => {
 
             {synthesisResult && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-2xl font-bold">
                     {(parsedPdfs.length + (content.trim() ? 1 : 0)) > 1 ? "Synthesized Analysis" : "Summary"}
                   </CardTitle>
+                  <Button variant="ghost" size="icon" onClick={handleCopy}>
+                    {isCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    <span className="sr-only">Copy analysis</span>
+                  </Button>
                 </CardHeader>
                 <CardContent>
                   <div className="prose dark:prose-invert max-w-none">
