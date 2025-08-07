@@ -179,16 +179,13 @@ serve(async (req) => {
 
     // Mode 2: Full PDF extraction and synthesis
     if (mode === 'extract_and_synthesize' && pdfs && pdfs.length > 0) {
-      console.log(`[SERVER] Starting batched extraction for ${pdfs.length} PDF(s).`);
+      console.log(`[SERVER] Starting sequential extraction for ${pdfs.length} PDF(s).`);
       
-      const BATCH_SIZE = 3; // Process 3 PDFs at a time
       let extractions = [];
 
-      for (let i = 0; i < pdfs.length; i += BATCH_SIZE) {
-        const batch = pdfs.slice(i, i + BATCH_SIZE);
-        console.log(`[SERVER] Processing batch starting with: ${batch[0].name}`);
-
-        const extractionPromises = batch.map((pdf: any) => {
+      for (const pdf of pdfs) {
+        console.log(`[SERVER] Processing: ${pdf.name}`);
+        try {
           const contentWithPages = pdf.pages
             .map((p: { page: number; content: string }) => `--- Page ${p.page} ---\n${p.content}`)
             .join('\n\n');
@@ -201,24 +198,13 @@ serve(async (req) => {
           
           const extractionPrompt = `${PDF_ANALYSIS_PROMPT}\n\nHere is the text to analyze:\n\n${contentToProcess}`;
           
-          return callClaude(extractionPrompt, claudeApiKey)
-              .then(summary => {
-                  console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
-                  return { name: pdf.name, summary };
-              })
-              .catch(error => {
-                  console.error(`[SERVER] Failed to extract: ${pdf.name}`, error);
-                  return { name: pdf.name, summary: `Error processing this document: ${error.message}` };
-              });
-        });
+          const summary = await callClaude(extractionPrompt, claudeApiKey);
+          console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
+          extractions.push({ name: pdf.name, summary });
 
-        const batchResults = await Promise.all(extractionPromises);
-        extractions = extractions.concat(batchResults);
-
-        const isLastBatch = (i + BATCH_SIZE) >= pdfs.length;
-        if (!isLastBatch) {
-            console.log(`[SERVER] Batch complete. Waiting for 2 seconds before next batch...`);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // 2-second delay
+        } catch (error) {
+          console.error(`[SERVER] Failed to extract: ${pdf.name}`, error);
+          extractions.push({ name: pdf.name, summary: `Error processing this document: ${error.message}` });
         }
       }
       
