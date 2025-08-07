@@ -179,33 +179,42 @@ serve(async (req) => {
 
     // Mode 2: Full PDF extraction and synthesis
     if (mode === 'extract_and_synthesize' && pdfs && pdfs.length > 0) {
-      console.log(`[SERVER] Starting parallel extraction for ${pdfs.length} PDF(s).`);
+      console.log(`[SERVER] Starting batched extraction for ${pdfs.length} PDF(s).`);
       
-      const extractionPromises = pdfs.map((pdf: any) => {
-        const contentWithPages = pdf.pages
-          .map((p: { page: number; content: string }) => `--- Page ${p.page} ---\n${p.content}`)
-          .join('\n\n');
+      const BATCH_SIZE = 3; // Process 3 PDFs at a time
+      let extractions = [];
 
-        let contentToProcess = contentWithPages;
-        if (contentToProcess.length > MAX_CONTENT_LENGTH) {
-          console.warn(`Content from ${pdf.name} is too long and is being truncated.`);
-          contentToProcess = contentToProcess.substring(0, MAX_CONTENT_LENGTH);
-        }
-        
-        const extractionPrompt = `${PDF_ANALYSIS_PROMPT}\n\nHere is the text to analyze:\n\n${contentToProcess}`;
-        
-        return callClaude(extractionPrompt, claudeApiKey)
-            .then(summary => {
-                console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
-                return { name: pdf.name, summary };
-            })
-            .catch(error => {
-                console.error(`[SERVER] Failed to extract: ${pdf.name}`, error);
-                return { name: pdf.name, summary: `Error processing this document: ${error.message}` };
-            });
-      });
+      for (let i = 0; i < pdfs.length; i += BATCH_SIZE) {
+        const batch = pdfs.slice(i, i + BATCH_SIZE);
+        console.log(`[SERVER] Processing batch starting with: ${batch[0].name}`);
 
-      const extractions = await Promise.all(extractionPromises);
+        const extractionPromises = batch.map((pdf: any) => {
+          const contentWithPages = pdf.pages
+            .map((p: { page: number; content: string }) => `--- Page ${p.page} ---\n${p.content}`)
+            .join('\n\n');
+
+          let contentToProcess = contentWithPages;
+          if (contentToProcess.length > MAX_CONTENT_LENGTH) {
+            console.warn(`Content from ${pdf.name} is too long and is being truncated.`);
+            contentToProcess = contentToProcess.substring(0, MAX_CONTENT_LENGTH);
+          }
+          
+          const extractionPrompt = `${PDF_ANALYSIS_PROMPT}\n\nHere is the text to analyze:\n\n${contentToProcess}`;
+          
+          return callClaude(extractionPrompt, claudeApiKey)
+              .then(summary => {
+                  console.log(`[SERVER] Successfully extracted: ${pdf.name}`);
+                  return { name: pdf.name, summary };
+              })
+              .catch(error => {
+                  console.error(`[SERVER] Failed to extract: ${pdf.name}`, error);
+                  return { name: pdf.name, summary: `Error processing this document: ${error.message}` };
+              });
+        });
+
+        const batchResults = await Promise.all(extractionPromises);
+        extractions = extractions.concat(batchResults);
+      }
       
       const successfulExtractions = extractions.filter(e => !e.summary.startsWith('Error processing'));
 
