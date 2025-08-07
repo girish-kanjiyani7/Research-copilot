@@ -130,29 +130,46 @@ Use this exact structure for your output, ensuring every point is cited with its
 
 async function callClaude(finalPrompt: string, claudeApiKey: string) {
   const claudeApiUrl = "https://api.anthropic.com/v1/messages";
-  const apiResponse = await fetch(claudeApiUrl, {
-    method: 'POST',
-    headers: {
-      'x-api-key': claudeApiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20240620",
-      max_tokens: 4096,
-      temperature: 0.0,
-      messages: [{ role: 'user', content: finalPrompt }],
-    }),
-  });
+  const maxRetries = 3;
+  let delay = 1000; // Start with a 1-second delay
 
-  if (!apiResponse.ok) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const apiResponse = await fetch(claudeApiUrl, {
+      method: 'POST',
+      headers: {
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-sonnet-20240620",
+        max_tokens: 4096,
+        temperature: 0.0,
+        messages: [{ role: 'user', content: finalPrompt }],
+      }),
+    });
+
+    if (apiResponse.ok) {
+      const claudeData = await apiResponse.json();
+      return claudeData.content[0].text;
+    }
+
+    // If we get a rate limit error (429) and have retries left
+    if (apiResponse.status === 429 && attempt < maxRetries) {
+      console.warn(`Rate limit hit. Retrying in ${delay / 1000}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Double the delay for the next retry (exponential backoff)
+      continue; // Go to the next iteration of the loop
+    }
+
+    // For any other error, or if we've run out of retries
     const errorBody = await apiResponse.text();
     console.error("Claude API Error:", errorBody);
     throw new Error(`External API Error: Claude API request failed with status ${apiResponse.status}.`);
   }
 
-  const claudeData = await apiResponse.json();
-  return claudeData.content[0].text;
+  // This line should not be reached if the loop logic is correct, but it's a safeguard.
+  throw new Error("Claude API request failed after all retries.");
 }
 
 serve(async (req) => {
